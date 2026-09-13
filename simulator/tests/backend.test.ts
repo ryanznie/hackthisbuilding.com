@@ -97,6 +97,10 @@ test('prompt controls, JSON size, and cross-origin writes are rejected', async (
     assert.throws(() => checkPrompt(input), (error: unknown) => error instanceof ApiFailure && error.code === 'ADVERSARIAL_PROMPT');
   }
   assert.equal(checkPrompt('  a red heart  '), 'a red heart');
+  for (const benign of ['Show pixel art of a moon', 'Pixel art of a sunset', 'A pixel art dragon', 'A window reflecting a sunset', 'A pixel art coffee cup']) {
+    assert.equal(checkPrompt(benign), benign, 'coordinate verbs must not match fragments inside ordinary words');
+  }
+  for (const direct of ['all windows off', 'pixel toggle', 'row set', 'windows on']) assert.throws(() => checkPrompt(direct), ApiFailure);
   assert.throws(() => checkOrigin(new Request('https://hackthisbuilding.com/api/submit', { method: 'POST', headers: { Origin: 'https://attacker.test' } })), ApiFailure);
   assert.throws(() => checkOrigin(new Request('https://hackthisbuilding.com/api/submit', { method: 'POST' })), ApiFailure);
   assert.doesNotThrow(() => checkOrigin(new Request('https://hackthisbuilding.com/api/submit', { method: 'POST', headers: { Origin: 'https://hackthisbuilding.com' } })));

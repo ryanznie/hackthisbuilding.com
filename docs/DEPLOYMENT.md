@@ -27,6 +27,10 @@ Configure `OPENROUTER_API_KEY` as a Worker secret with `npx wrangler secret put 
 
 Run `validator/app.py` as a private Python service with `OPENROUTER_API_KEY` and a strong `VALIDATOR_TOKEN`. Configure the Worker with `VALIDATOR_URL` and the matching `VALIDATOR_TOKEN` secret. The validator uses strict Pydantic models, forbids extra fields, rejects political or strobing content, marks adversarial prompts, and retries invalid or transient moderation responses up to three times. Without `VALIDATOR_URL`, the legacy in-Worker moderation remains available for development compatibility.
 
+Python owns moderation retries: at most three model calls, each with a 20-second transport timeout and backoffs of 250ms and 500ms. The Worker sends `/moderate` once with a 65-second deadline, leaving room for those attempts and avoiding duplicate nested moderation requests. Keep any service proxy timeout above that Worker deadline. A Python transport timeout is not a hard total execution limit; the Worker's deadline remains the caller's bound, and cancellation does not guarantee the server has stopped its current model request.
+
+`/validate-animation` performs no model call. The Worker permits at most three HTTP attempts with a five-second timeout each and the same backoff schedule; a schema rejection (HTTP 422) is returned immediately without retrying that request. Generated-output retries remain separately bounded at three candidate generations. Validation errors omit raw inputs, documentation URLs, and exception context so field-validator failures remain JSON-serializable and do not expose rejected content.
+
 When that secret is present:
 
 - Text moderation and ordinary motion prompts use `google/gemini-2.5-flash` through OpenRouter. Motion prompts still produce constrained, validated shape instructions.
