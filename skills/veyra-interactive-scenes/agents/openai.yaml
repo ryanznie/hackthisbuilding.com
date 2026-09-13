@@ -1,0 +1,4 @@
+interface:
+  display_name: "Veyra Interactive Scenes"
+  short_description: "Polished interactive scenes from pinned references"
+  default_prompt: "Use $veyra-interactive-scenes to build a polished interactive scene from a visual reference."
