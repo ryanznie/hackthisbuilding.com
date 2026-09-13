@@ -24,16 +24,17 @@ The independent renderer reviewer tested session ownership and exact-scene admis
 
 The physical installation and organizer-hosted simulator instance remain unconnected. Automatic deployment from GitHub is not configured; GitHub runs validation, and the documented local deploy command publishes the application.
 
-## 3D upgrade — local acceptance, September 13, 2026
+## 3D upgrade — local and public acceptance, September 13, 2026
 
-The user approved the localhost 3D experience for publication. These checks cover the current local upgrade; they do not establish that the newest version has reached the public domain.
+The user approved the localhost 3D experience for publication. Commit `82c63229f8dbe8d34e755c9a06ba5db4b8030121` was deployed and verified at **https://www.hackthisbuilding.com**. Cloudflare Pages deployment: `044ddfcf`; Worker version: `db024534-6f0d-4ef0-8afc-366ceef4aefe`.
 
 | Check | Observed result |
 |---|---|
 | Actual 3D rendering | Real WebGL building geometry and 153 individually animated windows were observed in the browser on desktop and a 390px-wide mobile viewport. |
-| Camera interaction | Keyboard orbit and camera-view changes were verified. Camera presentation remains separate from the shared animation clock. |
+| Camera interaction | Keyboard orbit and camera-view changes were verified. The 153-window hotspot selects Facade; Escape closes its explanation and restores focus. Camera presentation remains separate from the shared animation clock. |
 | Automated checks | 22 tests passed, including three Three.js tests and the backend regression for non-expiring curated examples. Typecheck and production build passed. |
 | Existing public workflow | Real AI generation, moderation, exact-preview submission, FIFO playback, reactions and completion were previously verified on the public backend, as recorded above. |
-| Publication status | Local acceptance complete; newest public deployment still requires verification. |
+| Public 3D workflow | The custom domain showed Interactive 3D. “A golden rocket rising through blue stars” generated Golden Ascension, visibly animated the 3D windows, joined the shared queue with a countdown, and played in the shared 3D show. |
+| Publication status | Public HTML serves the new `index-DsGuTL_a.js` build. `/api/health` returned healthy with generation available. [GitHub validation passed](https://github.com/ryanznie/hackthisbuilding.com/actions/runs/34770909742). |
 
 The renderer loads separately and retains the 2D canvas while loading or when WebGL fails. Automated checks cover the 153-window layout and RGB mapping; this is not a claim of physical-device testing or connection to MIT's building.
