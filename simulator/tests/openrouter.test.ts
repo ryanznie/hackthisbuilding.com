@@ -15,7 +15,7 @@ test('OpenRouter adapter preserves vision messages and returns parseable JSON wi
     assert.equal(headers.get('X-Title'), 'Hack This Building');
     assert.equal(init?.redirect, 'manual');
     assert.deepEqual(JSON.parse(init!.body as string), {
-      model: 'google/gemini-2.5-flash', messages, temperature: 0.2, max_tokens: 80,
+      model: 'openai/gpt-4.1-mini', messages, temperature: 0.2, max_tokens: 80,
       response_format: { type: 'json_object' }, stream: false,
     });
     return Response.json({ choices: [{ message: { content: '{"allowed":true}' } }] });

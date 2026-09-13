@@ -23,6 +23,10 @@ For frontend hot reload, also run `npm run dev`; Vite forwards API requests to p
 
 Configure `OPENROUTER_API_KEY` as a Worker secret with `npx wrangler secret put OPENROUTER_API_KEY`. For local development, keep the value in the ignored `simulator/.dev.vars` file. Never include it in frontend variables, checked-in files, or browser requests.
 
+## Pydantic safety validator
+
+Run `validator/app.py` as a private Python service with `OPENROUTER_API_KEY` and a strong `VALIDATOR_TOKEN`. Configure the Worker with `VALIDATOR_URL` and the matching `VALIDATOR_TOKEN` secret. The validator uses strict Pydantic models, forbids extra fields, rejects political or strobing content, marks adversarial prompts, and retries invalid or transient moderation responses up to three times. Without `VALIDATOR_URL`, the legacy in-Worker moderation remains available for development compatibility.
+
 When that secret is present:
 
 - Text moderation and ordinary motion prompts use `google/gemini-2.5-flash` through OpenRouter. Motion prompts still produce constrained, validated shape instructions.

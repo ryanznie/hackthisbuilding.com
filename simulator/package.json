@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:all": "bash scripts/dev-local.sh",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "wrangler dev --port 8787",
+    "preview": "wrangler dev --config wrangler.local.jsonc --port 8787",
     "deploy": "npm run typecheck && npm test && npm run build && wrangler deploy && wrangler pages deploy --cwd pages --project-name hackthisbuilding --branch main",
     "test": "tsx --test tests/*.test.ts"
   },
