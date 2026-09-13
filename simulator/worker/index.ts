@@ -1,5 +1,5 @@
-import type { Clip } from '../shared/contracts';
-import { exampleClips } from '../shared/render';
+import { CLIP_MS, FPS, type Clip } from '../shared/contracts';
+import { exampleClips, renderScene, urlFrame } from '../shared/render';
 import { ApiFailure, checkPrompt, generateAnimation, PREVIEW_TTL_MS, validateRenderedScene, type AIBinding } from './generation';
 import { createOpenRouterAI } from './openrouter';
 import { createValidationService } from './validator';
@@ -12,6 +12,7 @@ export interface Env {
   OPENROUTER_API_KEY?: string;
   VALIDATOR_URL?: string;
   VALIDATOR_TOKEN?: string;
+  DISPLAY_RUNNER_TOKEN?: string;
   ADMIN_TOKEN?: string;
 }
 interface StoredClip { clip: Clip; owner: string | null; catalogId?: string; }
@@ -197,6 +198,26 @@ export class BuildingShow {
       if (!/^[a-f0-9]{64}$/.test(owner) || !/^[a-f0-9]{64}$/.test(ipHash)) throw new ApiFailure(403, 'INVALID_SESSION', 'Reload the website to start a session.');
       if (request.method === 'GET') {
         if (path === '/api/health') return json({ ok: true, generationAvailable: !!(this.env.OPENROUTER_API_KEY || this.env.AI), imageGenerationAvailable: false, generationProvider: this.env.OPENROUTER_API_KEY ? 'openrouter-text' : 'workers-ai', mode: 'simulator' });
+        if (path === '/api/display/frame') {
+          if (!this.env.DISPLAY_RUNNER_TOKEN) throw new ApiFailure(503, 'DISPLAY_FEED_UNAVAILABLE', 'The display feed is not configured.');
+          const token = request.headers.get('authorization')?.replace(/^Bearer /, '') ?? '';
+          if (!tokenMatches(token, this.env.DISPLAY_RUNNER_TOKEN)) throw new ApiFailure(401, 'UNAUTHORIZED', 'Display runner authorization is required.');
+          return json(await this.state(now => {
+            const current = this.data.schedule.current;
+            const playing = !!current && current.scheduledAt <= now && now < current.scheduledAt + CLIP_MS;
+            const elapsedMs = playing ? now - current.scheduledAt : now - this.data.schedule.phaseStartedAt;
+            const scene = playing ? current.clip.scene : null;
+            const isStatic = !!scene && scene.layers.every(layer => layer.motion === 'still') && (!scene.raster || scene.raster.motion === 'still');
+            return {
+              frame: scene ? renderScene(scene, elapsedMs) : urlFrame(elapsedMs),
+              sequence: isStatic ? 0 : Math.floor(elapsedMs * FPS / 1000),
+              displayId: playing ? `clip:${current.id}` : `invitation:${this.data.schedule.phaseStartedAt}`,
+              mode: playing ? 'clip' : 'invitation',
+              static: isStatic,
+              generatedAt: now,
+            };
+          }));
+        }
         if (path === '/api/state') return json(await this.state(now => this.publicState(owner, now)));
         if (path === '/api/examples') return json(await this.state(now => ({ clips: this.reconcileExamples(now) })));
         throw new ApiFailure(404, 'NOT_FOUND', 'This endpoint does not exist.');

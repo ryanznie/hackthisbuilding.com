@@ -82,3 +82,11 @@ The script POSTs to `/api/admin` with JSON `{"action":"pause"}`, `resume`, `skip
 ## Connecting the physical installation later
 
 Get an authorized organizer instance and the actual controller protocol. Build an operator-controlled adapter that samples `renderScene` or `urlFrame` at up to 30 FPS from server time, maps orientation and color calibration, and sends the exact 17×9 frames. Test in the organizer simulator before MIT-approved installation. Keep the website labeled simulator until that live path is verified.
+
+## Organizer simulator display runner
+
+The `display_runner/` service bridges the authoritative queue to the organizer simulator without exposing its instance name or send endpoint to browsers. Configure a strong `DISPLAY_RUNNER_TOKEN` on both the Worker and runner, then set `GREEN_BUILDING_INSTANCE` to the exact server-issued adjective-animal name. Copy `display_runner/.env.example` to the ignored `.env`, install its requirements, and run `python runner.py`.
+
+The Worker exposes the current rendered 17-row × 9-column frame at authenticated `GET /api/display/frame`. The runner validates every RGB channel, converts the frame to the documented 459-byte row-major format, and sends through a `makeframe()`/`send()` adapter. Static clips are sent once. Dynamic clips and the invitation URL are sampled at no more than 30 FPS, below the simulator's 40-request-per-second ceiling. The sender is latest-frame-wins and stops after five consecutive source or target failures rather than continuing blindly.
+
+Only one runner may target an instance. Use a staging-only instance until an organizer supplies the authorized physical-building adapter; clip upload and simulator lifecycle APIs are intentionally absent from the production-compatible runner.
