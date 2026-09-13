@@ -23,3 +23,17 @@ Tests cover all primitive/motion combinations, deterministic frames, strict scen
 The independent renderer reviewer tested session ownership and exact-scene admission and verified three real Workers AI inference calls in about 2.57 seconds. Those calls exposed the parsed-object model response change, which was fixed before the successful public-browser generation.
 
 The physical installation and organizer-hosted simulator instance remain unconnected. Automatic deployment from GitHub is not configured; GitHub runs validation, and the documented local deploy command publishes the application.
+
+## 3D upgrade — local acceptance, September 13, 2026
+
+The user approved the localhost 3D experience for publication. These checks cover the current local upgrade; they do not establish that the newest version has reached the public domain.
+
+| Check | Observed result |
+|---|---|
+| Actual 3D rendering | Real WebGL building geometry and 153 individually animated windows were observed in the browser on desktop and a 390px-wide mobile viewport. |
+| Camera interaction | Keyboard orbit and camera-view changes were verified. Camera presentation remains separate from the shared animation clock. |
+| Automated checks | 22 tests passed, including three Three.js tests and the backend regression for non-expiring curated examples. Typecheck and production build passed. |
+| Existing public workflow | Real AI generation, moderation, exact-preview submission, FIFO playback, reactions and completion were previously verified on the public backend, as recorded above. |
+| Publication status | Local acceptance complete; newest public deployment still requires verification. |
+
+The renderer loads separately and retains the 2D canvas while loading or when WebGL fails. Automated checks cover the 153-window layout and RGB mapping; this is not a claim of physical-device testing or connection to MIT's building.

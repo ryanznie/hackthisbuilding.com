@@ -2,7 +2,9 @@
 
 The public app is at **https://www.hackthisbuilding.com**. The bare domain forwards there. The React app is deployed to Cloudflare Pages; `/api/*` is forwarded through a service binding to the `hackthisbuilding` Worker. A single Durable Object (`public-show-v1`) owns the persisted public queue. Workers AI performs prompt moderation, scene generation, and a second check of public text.
 
-This release is an interactive **in-browser simulator**. It does not send light commands to MIT's building or the organizer's protected simulator instance. The architectural canvas follows the provided nighttime simulator screenshot and renders the same 17-row × 9-column RGB frames used by the animation engine.
+This application is an interactive **in-browser simulator**. It does not send light commands to MIT's building or the organizer's protected simulator instance. The current source renders actual Three.js building geometry with 153 animated windows, following the provided nighttime simulator reference. Its windows use the same 17-row × 9-column RGB frames as the deterministic animation engine. See [acceptance results](acceptance-results.md) for the distinction between verified local upgrades and verified public deployment.
+
+The 3D module loads separately, with the 2D canvas retained during loading or WebGL failure. Pointer, touch, and keyboard camera controls change the viewpoint without changing the approved clip or shared clock. Arrow keys orbit, +/− zoom, and Home resets the view. Use the camera-view controls for preset framing.
 
 ## Develop
 
@@ -29,6 +31,8 @@ npx wrangler pages deploy --cwd pages --project-name hackthisbuilding --branch m
 
 Run the commands above from `simulator/`. `npm run deploy` performs these steps. Sign in with `npx wrangler login` to an account that owns both projects. The Worker must be deployed before Pages because Pages binds to it. Cloudflare AI usage is charged to the deploying account under its current plan; application limits bound preview requests.
 
+After publishing, verify the public `/api/health` endpoint, the loaded 3D scene and camera controls, and a preview-to-queue interaction on the custom domain. A successful local build or upload alone does not establish that visitors have received the latest version.
+
 GitHub Actions runs checks on main and pull requests. **Git pushes do not automatically deploy this initial release.** Automatic deployment requires a repo administrator to add a scoped Cloudflare API token (Workers Scripts Edit, account-level Workers AI access, and Cloudflare Pages Edit as required by the deploy commands) and account ID to a deployment workflow. Never put a developer's broad CLI OAuth token in the repository or GitHub secrets.
 
 ## Domain routing
@@ -48,6 +52,7 @@ The script POSTs to `/api/admin` with JSON `{"action":"pause"}`, `resume`, `skip
 
 - A prompt is at most 280 characters. The model can compose bounded shape-and-motion instructions; it cannot execute arbitrary code or load external resources.
 - Preview privately, then explicitly submit that exact server-approved clip.
+- AI previews expire after 30 minutes. Server-curated examples use `expiresAt: 0` and remain available in an open page; that exemption cannot be used by AI clips.
 - One pending or playing turn per session; at most 10 waiting turns; submissions are idempotent.
 - FIFO determines turn order. Hearts are reactions and do not reorder it.
 - Each clip lasts 5 seconds. The domain scrolls for two full 12-second passes between clips. The displayed wait includes those passes; the last 5 seconds are the countdown.

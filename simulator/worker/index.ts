@@ -141,8 +141,15 @@ export class BuildingShow {
     this.lock = operation.catch(() => undefined);
     return operation;
   }
+  private isCuratedExample(id: string, stored: StoredClip): boolean {
+    return stored.owner === null && stored.clip.source === 'example' && this.data.examples.includes(id);
+  }
   private prune(now: number): void {
-    for (const [id, stored] of Object.entries(this.data.clips)) if (stored.clip.expiresAt <= now) delete this.data.clips[id];
+    for (const [id, stored] of Object.entries(this.data.clips)) {
+      // Migrate existing server-owned examples without invalidating open-page IDs.
+      if (this.isCuratedExample(id, stored)) stored.clip.expiresAt = 0;
+      else if (stored.clip.expiresAt > 0 && stored.clip.expiresAt <= now) delete this.data.clips[id];
+    }
     for (const [key, receipt] of Object.entries(this.data.receipts)) if (receipt.at < now - 86_400_000) delete this.data.receipts[key];
     for (const [key, timestamps] of Object.entries(this.data.limits)) {
       const window = key === 'global-day' ? 86_400_000 : key.startsWith('session-hour:') ? 3_600_000 : key.startsWith('ip:') ? 600_000 : 60_000;
@@ -166,7 +173,7 @@ export class BuildingShow {
         if (path === '/api/examples') return json(await this.state(now => {
           if (!this.data.examples.length || this.data.examples.some(id => !this.data.clips[id])) {
             this.data.examples = exampleClips().map(example => {
-              const clip: Clip = { ...example, id: `example_${crypto.randomUUID()}`, scene: validateRenderedScene(example.scene), source: 'example', createdAt: now, expiresAt: now + PREVIEW_TTL_MS };
+              const clip: Clip = { ...example, id: `example_${crypto.randomUUID()}`, scene: validateRenderedScene(example.scene), source: 'example', createdAt: now, expiresAt: 0 };
               this.data.clips[clip.id] = { clip, owner: null };
               return clip.id;
             });
@@ -206,7 +213,8 @@ export class BuildingShow {
           if (schedule.current?.owner === owner || schedule.queue.some(item => item.owner === owner)) throw new ApiFailure(409, 'ALREADY_QUEUED', 'You already have an animation in the show.');
           if (schedule.queue.length >= QUEUE_LIMIT) throw new ApiFailure(409, 'QUEUE_FULL', 'The queue is full. Keep your preview and try again after a turn finishes.');
           const stored = Object.hasOwn(this.data.clips, clipId) ? this.data.clips[clipId] : undefined;
-          if (!stored || stored.clip.expiresAt <= now || (stored.owner !== null && stored.owner !== owner)) throw new ApiFailure(404, 'PREVIEW_EXPIRED', 'This preview has expired or belongs to another visitor. Create a new preview.');
+          const timelessExample = stored && stored.clip.expiresAt === 0 && this.isCuratedExample(clipId, stored);
+          if (!stored || (!timelessExample && !(stored.clip.expiresAt > now)) || (stored.owner !== null && stored.owner !== owner)) throw new ApiFailure(404, 'PREVIEW_EXPIRED', 'This preview has expired or belongs to another visitor. Create a new preview.');
           const id = crypto.randomUUID();
           schedule.queue.push({ id, owner, clip: structuredClone(stored.clip), submittedAt: now, scheduledAt: 0, voters: [] });
           reschedule(schedule, now);

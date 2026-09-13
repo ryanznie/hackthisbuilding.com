@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Building, type BuildingView } from './Building';
+import { type BuildingView } from './Building';
+import { BuildingExperience, type RenderingMode } from './BuildingExperience';
 import { CLIP_MS, URL_PASS_MS, type Clip, type ShowState, type QueueItem } from '../shared/contracts';
 
 type IconName = 'arrow' | 'spark' | 'play' | 'pause' | 'heart' | 'close' | 'check' | 'external' | 'queue';
@@ -55,7 +56,6 @@ function QueueRow({ item, index, now, onVote, onCancel, busy, connected, paused 
 export default function App() {
   const [state, setState] = useState<ShowState | null>(null);
   const [connected, setConnected] = useState(false);
-  const [connectionAttempted, setConnectionAttempted] = useState(false);
   const [clockOffset, setClockOffset] = useState(0);
   const [tick, setTick] = useState(Date.now());
   const [prompt, setPrompt] = useState('');
@@ -64,6 +64,9 @@ export default function App() {
   const [previewStartedAt, setPreviewStartedAt] = useState(Date.now());
   const [screen, setScreen] = useState<'preview' | 'live'>('preview');
   const [view, setView] = useState<BuildingView>('full');
+  const [cameraRevision, setCameraRevision] = useState(0);
+  const [renderingMode, setRenderingMode] = useState<RenderingMode>('loading');
+  const [showFacadeInfo, setShowFacadeInfo] = useState(false);
   const [animationPaused, setAnimationPaused] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [generating, setGenerating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -77,6 +80,7 @@ export default function App() {
   const syncing = useRef(false);
   const exampleInitialized = useRef(false);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const facadeButtonRef = useRef<HTMLButtonElement>(null);
   const requestId = useRef<{ clipId: string; id: string } | null>(null);
 
   const sync = useCallback(async () => {
@@ -88,7 +92,7 @@ export default function App() {
       setClockOffset(next.serverTime - (started + Date.now()) / 2);
       setState(next); setConnected(true);
     } catch { setConnected(false); }
-    finally { syncing.current = false; setConnectionAttempted(true); }
+    finally { syncing.current = false; }
   }, []);
 
   useEffect(() => {
@@ -109,6 +113,21 @@ export default function App() {
     }).catch(() => { if (active) setExamplesError(true); });
     return () => { active = false; };
   }, []);
+
+  const closeFacadeInfo = useCallback(() => {
+    setShowFacadeInfo(false); facadeButtonRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!showFacadeInfo) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') closeFacadeInfo(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [showFacadeInfo, closeFacadeInfo]);
+
+  function selectView(next: BuildingView) {
+    setView(next); setCameraRevision(value => value + 1);
+  }
 
   const now = tick + clockOffset;
   const scheduledItems = [state?.current, ...(state?.queue || [])].filter((item): item is QueueItem => !!item);
@@ -140,7 +159,7 @@ export default function App() {
   const urlPass = state ? Math.floor(Math.max(0, now - liveStartedAt) / URL_PASS_MS) % 2 + 1 : 1;
   const ready = !!state && connected;
   const alreadySubmitted = preview ? state?.queue.some(item => item.mine && item.clip.id === preview.id) || (state?.current?.mine && state.current.clip.id === preview.id) : false;
-  const expired = preview ? preview.expiresAt <= now : false;
+  const expired = preview ? preview.expiresAt > 0 && preview.expiresAt <= now : false;
 
   async function generate(event: React.FormEvent) {
     event.preventDefault();
@@ -185,28 +204,29 @@ export default function App() {
     <a href="#prompt" className="skip-link">Skip to prompt editor</a>
     <header className="site-header">
       <a className="brand" href="/" aria-label="Hack This Building home"><span className="brand-mark" aria-hidden="true">{Array.from({ length: 9 }, (_, i) => <i key={i} />)}</span><span>hack<span className="brand-light">this</span>building<span className="brand-dot">.</span></span></a>
-      <div className="header-right"><span className="event-label mono">SUNDAI HACK 140 <span>↗</span></span><a href="https://github.com/ryanznie/hackthisbuilding.com" target="_blank" rel="noreferrer" className="source-link">Open source <Icon name="external" size={14} /></a></div>
+      <span className="header-middle">A public light experiment.</span><div className="header-right"><span className="event-label mono">SUNDAI HACK 140 <span>↗</span></span><a href="https://github.com/ryanznie/hackthisbuilding.com" target="_blank" rel="noreferrer" className="source-link">Open source <Icon name="external" size={14} /></a></div>
     </header>
 
     <main>
-      <section className="intro" aria-labelledby="main-title"><div><p className="eyebrow mono"><span className="tiny-cross">+</span> MIT GREEN BUILDING / CAMBRIDGE, MA</p><h1 id="main-title">Give this building <span>an idea.</span></h1></div><p className="intro-description">153 windows. Five seconds.<br />Your imagination, at building scale.</p></section>
+      <section className="intro" aria-labelledby="main-title"><div><p className="eyebrow mono"><span className="tiny-cross">+</span> MIT GREEN BUILDING / CAMBRIDGE, MA</p><h1 id="main-title">Give this building <span>an idea.</span></h1></div><p className="intro-description">Explore the building. Imagine something.<br /><span>153 windows are waiting for your idea.</span></p></section>
 
       <section className="workspace" aria-label="Building animation studio">
         <div className="simulator-panel">
-          <div className="simulator-toolbar"><div className="screen-tabs" role="group" aria-label="Display source"><button className={screen === 'preview' ? 'active' : ''} onClick={() => setScreen('preview')} disabled={!preview}>Your preview</button><button className={screen === 'live' ? 'active' : ''} onClick={() => setScreen('live')}><span className={`status-dot ${connected ? '' : 'status-dot--offline'}`} />Shared show</button></div><span className="simulator-label mono">SIMULATOR</span></div>
+          <div className="simulator-toolbar"><div className="screen-tabs" role="group" aria-label="Display source"><button aria-pressed={screen === 'preview'} className={screen === 'preview' ? 'active' : ''} onClick={() => setScreen('preview')} disabled={!preview}>Your preview</button><button aria-pressed={screen === 'live'} className={screen === 'live' ? 'active' : ''} onClick={() => setScreen('live')}><span className={`status-dot ${connected ? '' : 'status-dot--offline'}`} />Shared show</button></div><span className={`renderer-status renderer-status--${renderingMode}`}><span className="renderer-cube" aria-hidden="true">◇</span>{renderingMode === '3d' ? 'Interactive 3D' : renderingMode === '2d' ? '2D fallback' : 'Loading 3D'}</span></div>
           <div className="building-stage">
-            <Building scene={shownClip?.scene || null} startedAt={showingPreview ? previewStartedAt : liveStartedAt} clockOffset={showingPreview ? 0 : clockOffset} view={view} paused={animationPaused || !!state?.paused && !showingPreview} preview={showingPreview} title={shownClip?.title || 'hackthisbuilding.com invitation'} />
-            <div className="scene-topline"><span className="scene-coordinate mono">42°21′38.5″N<br />71°05′23.5″W</span><span className="frame-spec mono">09 × 17<br />30 FPS</span></div>
+            <BuildingExperience onModeChange={setRenderingMode} cameraRevision={cameraRevision} scene={shownClip?.scene || null} startedAt={showingPreview ? previewStartedAt : liveStartedAt} clockOffset={showingPreview ? 0 : clockOffset} view={view} paused={animationPaused || !!state?.paused && !showingPreview} preview={showingPreview} title={shownClip?.title || 'hackthisbuilding.com invitation'} />
+            <div className="scene-topline"><span className="scene-coordinate">MIT Green Building<span className="mono">42°21′38.5″N / 71°05′23.5″W</span></span><span className="frame-spec mono">09 × 17<span>WINDOWS</span></span></div>
             <div className="scene-caption"><span className="mono">{showingPreview ? preview?.source === 'example' ? 'EXAMPLE PREVIEW' : 'YOUR PREVIEW' : state?.paused ? 'SHOW PAUSED' : livePlaying ? 'NOW PLAYING' : 'OPEN INVITATION'}</span><h2>{shownClip?.title || 'Your idea could be here.'}</h2><p>{showingPreview ? 'Loops here. Goes public only when you submit.' : livePlaying ? `${myPlaying ? 'Your animation' : 'Community animation'} · ${remaining(phaseRemaining)} remaining` : 'hackthisbuilding.com · Come make something.'}</p></div>
-            <div className="scene-bottomline"><div className="view-controls" role="group" aria-label="Building camera view">{(['full', 'windows', 'river'] as const).map(mode => <button key={mode} aria-pressed={view === mode} onClick={() => setView(mode)} className={view === mode ? 'active' : ''}>{mode === 'full' ? 'Full building' : mode === 'windows' ? 'Windows' : 'Across river'}</button>)}</div><button className="playback-button" onClick={() => setAnimationPaused(v => !v)} aria-label={animationPaused ? 'Resume animation' : 'Pause animation'} title={animationPaused ? 'Resume animation' : 'Pause animation'}><Icon name={animationPaused ? 'play' : 'pause'} size={16} /></button></div>
+            <div className="scene-bottomline"><div className="view-controls" role="group" aria-label="Building camera view">{(['full', 'windows', 'river'] as const).map(mode => <button key={mode} aria-pressed={view === mode} onClick={() => selectView(mode)} className={view === mode ? 'active' : ''} title={mode === 'full' ? 'Reset to street view' : mode === 'windows' ? 'Look at the light facade' : 'View from across the river'}>{mode === 'full' ? 'Street' : mode === 'windows' ? 'Facade' : 'River'}</button>)}</div><div className="stage-actions"><button ref={facadeButtonRef} className={`facade-hotspot ${showFacadeInfo ? 'is-open' : ''}`} onClick={() => { setShowFacadeInfo(value => !value); if (!showFacadeInfo) selectView('windows'); }} aria-expanded={showFacadeInfo} aria-controls="facade-detail" aria-label={showFacadeInfo ? 'Close explanation of the 153 windows' : 'Explore the 153-window light facade'}><span className="hotspot-disc" aria-hidden="true">{showFacadeInfo ? '−' : '+'}</span><span className="hotspot-label">153 windows</span></button><button className="playback-button" onClick={() => setAnimationPaused(v => !v)} aria-label={animationPaused ? 'Resume animation' : 'Pause animation'} title={animationPaused ? 'Resume animation' : 'Pause animation'}><Icon name={animationPaused ? 'play' : 'pause'} size={16} /></button></div></div>
           </div>
           <div className="playback-progress" role="progressbar" aria-label={showingPreview ? 'Preview playback' : 'Shared show playback'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(Math.max(0, Math.min(1, showingPreview ? previewProgress : liveProgress)) * 100)}><span style={{ transform: `scaleX(${Math.max(0, Math.min(1, showingPreview ? previewProgress : liveProgress))})` }} /></div>
-          <div className="simulator-footnote"><span><span className="status-dot status-dot--outline" />{!connectionAttempted ? 'Connecting to shared show…' : connected ? 'Browser simulation · not the physical building' : 'Reconnecting to the shared show…'}</span><span className="mono">{showingPreview ? '05.0 SEC / LOOP' : livePlaying ? '05.0 SEC / LIVE' : `URL PASS ${urlPass} / 2`}</span></div>
+          <div className="simulator-footnote"><span>{renderingMode === '3d' ? <><span className="orbit-symbol" aria-hidden="true">↔</span><span className="desktop-orbit-tip">Drag to orbit · scroll to zoom</span><span className="mobile-orbit-tip">Drag to orbit · pinch to zoom</span></> : renderingMode === '2d' ? '3D unavailable on this browser · 2D preview active' : 'The interactive scene is loading…'}</span><span className="mono">BROWSER SIMULATOR <span className="footnote-separator">/</span> {showingPreview ? '5 SEC LOOP' : livePlaying ? '5 SEC LIVE' : `URL ${urlPass}/2`}</span></div>
+          {showFacadeInfo && <div className="facade-detail" id="facade-detail"><span className="facade-detail-mark" aria-hidden="true">{Array.from({ length: 9 }, (_, i) => <i key={i} />)}</span><div><h3>One window. One pixel.</h3><p>Nine columns and seventeen rows turn this facade into a canvas. Bold shapes and simple movement read best at building scale. Your five-second preview uses the same 153-window grid as the shared show.</p></div><button className="icon-button" onClick={closeFacadeInfo} aria-label="Close facade explanation"><Icon name="close" size={18} /></button></div>}
         </div>
 
         <aside className="prompt-panel" aria-label="Create your animation">
           <div className="panel-heading"><span className="step-number mono">01</span><h2>Make a little spectacle.</h2><Icon name="spark" size={20} /></div>
-          <p className="panel-description">Describe what you want the windows to do. Think bold shapes, bright colors, simple moves.</p>
+          <p className="panel-description">A beating heart. A rocket in the night.<br />What would you put on the skyline?</p>
           <form onSubmit={generate} className="prompt-form"><label htmlFor="prompt">YOUR IDEA <span className="mono">{prompt.length}/280</span></label><div className={`textarea-wrap ${generating ? 'is-generating' : ''}`}><textarea ref={editorRef} id="prompt" value={prompt} maxLength={280} minLength={3} placeholder="A giant pink heart beating above the city…" onChange={event => { setPrompt(event.target.value); setError(''); }} aria-describedby="prompt-help prompt-error" disabled={generating} /><span className="prompt-corner" aria-hidden="true">↵</span></div><p id="prompt-help" className="input-hint">Keep it friendly. Every prompt is checked before it reaches the queue.</p><button className="generate-button" type="submit" disabled={prompt.trim().length < 3 || generating}>{generating ? <><span className="spinner" />Creating your preview…</> : <><Icon name="spark" />Generate preview<Icon name="arrow" /></>}</button></form>
           <div id="prompt-error" role={error ? 'alert' : undefined}>{error && <p className="form-message form-message--error">{error}</p>}</div>
           {state && !state.generationAvailable && !error && <p className="service-note">Custom prompts are temporarily unavailable. You can still preview and submit an example below.</p>}
@@ -225,7 +245,7 @@ export default function App() {
         <div className="queue-footer"><span><Icon name="heart" size={14} />Give ideas some love. Votes are reactions; the queue stays first come, first served.</span><button className="text-button" onClick={() => setShowHow(v => !v)} aria-expanded={showHow} aria-controls="how-it-works">How it works <span>{showHow ? '−' : '+'}</span></button></div>
         {showHow && <div id="how-it-works" className="how-it-works"><p><strong>1. Prompt & preview.</strong> Describe a simple animation. The prompt is checked, then turned into a five-second light sequence across 9 columns and 17 rows.</p><p><strong>2. Submit & wait your turn.</strong> Your exact preview joins the shared queue. Everyone sees the same show, and your personal countdown tells you when to look.</p><p><strong>3. Pass the building on.</strong> Each animation plays for five seconds. The website address then scrolls twice so another person can join. This is a browser simulator for the Sundai hack.</p></div>}
       </section>
-      <footer className="site-footer"><div><span className="footer-cross" aria-hidden="true">✳</span><span>Built together at <a href="https://www.sundai.club/events/boston/beyond-tetris-building-scale-physical-ai-for-mit-green-building" target="_blank" rel="noreferrer">Sundai Hack 140</a>.</span></div><span className="mono">A BUILDING BECOMES A CANVAS.</span></footer>
+      <footer className="site-footer"><div><span className="footer-cross" aria-hidden="true">✳</span><span>Built together at <a href="https://www.sundai.club/events/boston/beyond-tetris-building-scale-physical-ai-for-mit-green-building" target="_blank" rel="noreferrer">Sundai Hack 140</a>.</span></div><span className="footer-baseline-note">Explore the architecture. Light up the city.</span></footer>
     </main>
   </>;
 }

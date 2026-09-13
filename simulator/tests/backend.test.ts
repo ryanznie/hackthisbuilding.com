@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { CLIP_MS, URL_PASS_MS, type Clip, type Scene } from '../shared/contracts';
 import { initialSchedule, nextInvitationSlot, advance, reschedule, isReserved, removeWaiting, showState, stopCurrent, type Entry } from '../worker/schedule';
 import worker, { BuildingShow, boundReceipts, checkOrigin, consumeGenerationLimits, consumeMutationLimits, readBody, type Env } from '../worker/index';
-import { ApiFailure, checkPrompt, generateAnimation, MODEL, moderate, parseModelJson, type AIBinding } from '../worker/generation';
+import { ApiFailure, checkPrompt, generateAnimation, MODEL, moderate, parseModelJson, PREVIEW_TTL_MS, type AIBinding } from '../worker/generation';
 
 const scene: Scene = { version: 1, background: '#030711', layers: [{ shape: 'heart', color: '#FF595E', x: 4, y: 8, size: 5, motion: 'pulse', speed: 0.5, phase: 0 }] };
 const clip: Clip = { id: 'approved', title: 'Heart', interpretation: 'A simple heart pulses.', scene, createdAt: 0, expiresAt: 999999, source: 'ai' };
@@ -176,6 +176,38 @@ test('atomic concurrent submit returns one stored clip and stable idempotency re
   assert.equal(retried.state.queue.length, 1);
   assert.equal((await api(restart, 'submit', owner, { ...body, requestId: 'second-slot' })).status, 409);
   assert.equal((await api(restart, 'submit', other, { clipId: 'client-invented', requestId: 'invalid' })).status, 404);
+});
+
+test('curated examples remain usable after thirty minutes while AI previews still expire', async t => {
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, 'now', () => now);
+  let calls = 0;
+  const { show, ctx, env, storage } = setup({ AI: { run: async () => ({ response: ++calls === 2 ? { title: 'Heart', interpretation: 'A simple heart pulses.', scene } : { allowed: true } }) } });
+  const examples = await (await api(show, 'examples')).json() as { clips: Clip[] };
+  const chosen = examples.clips[0];
+  assert.equal(chosen.expiresAt, 0);
+  const previewResponse = await api(show, 'preview', owner, { prompt: 'a red heart' });
+  assert.equal(previewResponse.status, 200);
+  const { clip: generated } = await previewResponse.json() as { clip: Clip };
+  assert.equal(generated.expiresAt, now + PREVIEW_TTL_MS);
+
+  // Simulate a persisted pre-fix cache, then restore after that cache's old TTL.
+  const saved = await storage.get<any>('show');
+  saved.clips[chosen.id].clip.expiresAt = now + 1;
+  saved.clips['invalid-ai-zero'] = { owner, clip: { ...generated, id: 'invalid-ai-zero', expiresAt: 0 } };
+  await storage.put('show', saved);
+  now += PREVIEW_TTL_MS + 1;
+  const restored = new BuildingShow(ctx, env);
+  const refreshedExamples = await (await api(restored, 'examples')).json() as { clips: Clip[] };
+  assert.equal(refreshedExamples.clips[0].id, chosen.id);
+  assert.equal(refreshedExamples.clips[0].expiresAt, 0);
+  assert.equal((await api(restored, 'submit', owner, { clipId: generated.id, requestId: 'expired-ai' })).status, 404);
+  assert.equal((await api(restored, 'submit', owner, { clipId: 'invalid-ai-zero', requestId: 'invalid-ai-zero' })).status, 404);
+  const submitted = await api(restored, 'submit', owner, { clipId: chosen.id, requestId: 'long-open-example' });
+  assert.equal(submitted.status, 200);
+  const result = await submitted.json() as any;
+  assert.equal(result.state.queue[0].clip.id, chosen.id);
+  assert.equal(result.state.queue[0].clip.expiresAt, 0);
 });
 
 test('public reactions do not reorder; only owners cancel; operator auth gates pause', async () => {
