@@ -38,3 +38,10 @@ The user approved the localhost 3D experience for publication. Commit `82c63229f
 | Publication status | Public HTML serves the new `index-DsGuTL_a.js` build. `/api/health` returned healthy with generation available. [GitHub validation passed](https://github.com/ryanznie/hackthisbuilding.com/actions/runs/34770909742). |
 
 The renderer loads separately and retains the 2D canvas while loading or when WebGL fails. Automated checks cover the 153-window layout and RGB mapping; this is not a claim of physical-device testing or connection to MIT's building.
+
+## Mobile and image previews — September 13, 2026
+
+- At 390 × 844 and 375 × 667 browser viewports, the initial screen includes the compact 3D preview, prompt field, and Create preview button without scrolling. At 375px wide, that button ends at approximately 520px. Onboarding is Describe → Preview → Submit; examples form a horizontal strip.
+- The exact prompt “show the sundai logo” completed real OpenRouter text moderation, image generation from the official club reference, conversion to 153 window pixels, and vision moderation. Its local shared-queue turn completed successfully.
+- 38 automated tests passed. Image/provider checks also passed after updating the decompression dependency to its patched version. Dependency audit reported zero vulnerabilities.
+- The key is configured as a private Worker secret and is absent from browser code and tracked files. Full generated images are not persisted in the show state.

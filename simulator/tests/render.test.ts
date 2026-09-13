@@ -70,3 +70,63 @@ test('URL repeats after each full pass and includes both ends of the domain', ()
   assert.ok(letters(11400).flat().some(isInk), 'end of domain reaches the display');
   assert.ok(!letters(0).flat().some(isInk), 'pass starts with a clear left-to-right entry');
 });
+
+const rasterPixels = (): Frame => Array.from({ length: ROWS }, (_, row) => Array.from({ length: COLS }, (_, col) => [row * 13, col * 27, 255 - row * 9]));
+const rasterInput = () => ({ version: 1, background: '#ff0000', layers: [], raster: { pixels: rasterPixels(), motion: 'still' } });
+
+test('raster-only scenes preserve exact image pixels, orientation, and legacy scenes', () => {
+  const original = rasterInput();
+  const validated = validateScene(original);
+  const frame = renderScene(validated, 0);
+  validFrame(frame);
+  assert.deepEqual(frame, original.raster.pixels, 'opaque raster replaces the background without RGB conversion');
+  assert.deepEqual(frame[0][0], [0, 0, 255]);
+  assert.deepEqual(frame[16][8], [208, 216, 111]);
+  assert.deepEqual(renderScene(validated, 4333), frame, 'still images do not animate');
+  frame[0][0][0] = 123;
+  assert.equal(validated.raster!.pixels[0][0][0], 0, 'render output must not alias the scene');
+  validated.raster!.pixels[0][0][1] = 123;
+  assert.equal(original.raster.pixels[0][0][1], 0, 'validation must own a fresh pixel copy');
+  assert.deepEqual(validateScene(input()), input(), 'legacy scene shape remains unchanged');
+});
+
+test('raster validation rejects malformed grids, unsupported fields, and invalid RGB values', () => {
+  const valid = rasterInput().raster;
+  const invalidRasters: unknown[] = [null, undefined, {}, { ...valid, motion: 'strobe' }, { ...valid, motion: 'rise' }, { ...valid, url: 'https://example.com/logo.png' }, { ...valid, pixels: [] }, { ...valid, pixels: rasterPixels().slice(1) }, { ...valid, pixels: [...rasterPixels(), rasterPixels()[0]] }, { ...valid, pixels: Array(ROWS) }];
+  for (const invalidRow of [null, [], Array(COLS), Array(COLS - 1).fill([0, 0, 0]), Array(COLS + 1).fill([0, 0, 0])]) {
+    const pixels: unknown[] = rasterPixels(); pixels[5] = invalidRow;
+    invalidRasters.push({ ...valid, pixels });
+  }
+  for (const invalidPixel of [null, [], [0, 0], [0, 0, 0, 0], Array(3), [NaN, 0, 0], [0, Infinity, 0], [0, 0, -1], [256, 0, 0], [0.5, 0, 0], ['255', 0, 0]]) {
+    const pixels: unknown[][] = rasterPixels(); pixels[8][4] = invalidPixel;
+    invalidRasters.push({ ...valid, pixels });
+  }
+  for (const raster of invalidRasters) assert.throws(() => validateScene({ ...rasterInput(), raster }));
+  assert.throws(() => validateScene({ ...rasterInput(), layers: Array(9).fill(baseLayer) }), 'raster must not lift the layer budget');
+});
+
+test('raster pulse is deterministic, smooth, bounded, and never dims below eighty percent', () => {
+  const pixels: Frame = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => [255, 160, 80]));
+  const scene = validateScene({ ...rasterInput(), raster: { pixels, motion: 'pulse' } });
+  assert.deepEqual(renderScene(scene, 0), pixels);
+  assert.deepEqual(renderScene(scene, 2500)[0][0], [204, 128, 64]);
+  assert.deepEqual(renderScene(scene, 5000), pixels);
+  assert.deepEqual(renderScene(scene, 1789), renderScene(scene, 1789));
+  let previous = renderScene(scene, 0)[0][0][0];
+  for (let frameNumber = 1; frameNumber <= 150; frameNumber++) {
+    const frame = renderScene(scene, frameNumber * 1000 / 30);
+    validFrame(frame);
+    const red = frame[0][0][0];
+    assert.ok(red >= 204 && red <= 255);
+    assert.ok(Math.abs(red - previous) <= 2, 'adjacent frames must never flash');
+    previous = red;
+  }
+});
+
+test('legacy shapes can composite over a raster without changing untouched pixels', () => {
+  const pixels: Frame = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => [0, 0, 40]));
+  const scene = validateScene({ ...rasterInput(), raster: { pixels, motion: 'still' }, layers: [{ ...baseLayer, shape: 'circle', color: '#ff0000', size: 4, motion: 'still', speed: 0 }] });
+  const frame = renderScene(scene, 0);
+  assert.deepEqual(frame[8][4], [255, 0, 40]);
+  assert.deepEqual(frame[0][0], [0, 0, 40]);
+});

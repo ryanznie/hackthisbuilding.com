@@ -1,6 +1,6 @@
 # Running Hack This Building
 
-The public app is at **https://www.hackthisbuilding.com**. The bare domain forwards there. The React app is deployed to Cloudflare Pages; `/api/*` is forwarded through a service binding to the `hackthisbuilding` Worker. A single Durable Object (`public-show-v1`) owns the persisted public queue. Workers AI performs prompt moderation, scene generation, and a second check of public text.
+The public app is at **https://www.hackthisbuilding.com**. The bare domain forwards there. The React app is deployed to Cloudflare Pages; `/api/*` is forwarded through a service binding to the `hackthisbuilding` Worker. A single Durable Object (`public-show-v1`) owns the persisted public queue. The server uses OpenRouter when its secret is configured, and Workers AI when that secret is absent.
 
 This application is an interactive **in-browser simulator**. It does not send light commands to MIT's building or the organizer's protected simulator instance. The current source renders actual Three.js building geometry with 153 animated windows, following the provided nighttime simulator reference. Its windows use the same 17-row × 9-column RGB frames as the deterministic animation engine. See [acceptance results](acceptance-results.md) for the distinction between verified local upgrades and verified public deployment.
 
@@ -19,6 +19,22 @@ npm run preview
 
 For frontend hot reload, also run `npm run dev`; Vite forwards API requests to port 8787. Curated examples work without an AI connection. AI availability is explicit; an unavailable model never silently becomes a canned animation.
 
+## AI provider and image previews
+
+Configure `OPENROUTER_API_KEY` as a Worker secret with `npx wrangler secret put OPENROUTER_API_KEY`. For local development, keep the value in the ignored `simulator/.dev.vars` file. Never include it in frontend variables, checked-in files, or browser requests.
+
+When that secret is present:
+
+- Text moderation and ordinary motion prompts use `google/gemini-2.5-flash` through OpenRouter. Motion prompts still produce constrained, validated shape instructions.
+- Prompts mentioning a logo, icon, emblem, image, picture, photo, portrait, or Sundai use the image API with `google/gemini-2.5-flash-image`. Sundai requests include the bundled logo reference.
+- Each image request passes text moderation, PNG validation and conversion to the 17 × 9 window grid, then a vision safety check before an approved preview is returned. Benign logos and sports marks are allowed; they do not bypass moderation.
+- The image provider call has a 65-second timeout, with separate time allowed for surrounding checks. Provider failures return an explicit error; billable submissions are not automatically retried.
+- The application persists the resulting 153 RGB window values and approved scene metadata. It does not retain or serve the full generated image.
+
+When the key is absent, the Workers AI binding handles text moderation and shape generation; the OpenRouter image path is unavailable. An invalid or exhausted OpenRouter key produces an error instead of silently switching providers. `/api/health` identifies the configured provider and image-generation availability without exposing secrets.
+
+The bundled Sundai reference comes from the [official club logo](https://www.sundai.club/images/logos/sundai_logo_dark_horizontal.svg). The image prompt uses its cone emblem because the full wordmark cannot be legible across nine columns. Provider integration follows the [OpenRouter Image API](https://openrouter.ai/docs/guides/overview/multimodal/image-generation).
+
 ## Validate and deploy
 
 ```sh
@@ -29,7 +45,7 @@ npx wrangler deploy
 npx wrangler pages deploy --cwd pages --project-name hackthisbuilding --branch main
 ```
 
-Run the commands above from `simulator/`. `npm run deploy` performs these steps. Sign in with `npx wrangler login` to an account that owns both projects. The Worker must be deployed before Pages because Pages binds to it. Cloudflare AI usage is charged to the deploying account under its current plan; application limits bound preview requests.
+Run the commands above from `simulator/`. `npm run deploy` performs these steps. Sign in with `npx wrangler login` to an account that owns both projects. The Worker must be deployed before Pages because Pages binds to it. OpenRouter usage draws on the configured key's account; Workers AI usage follows the deploying Cloudflare account's plan. Application limits bound preview requests.
 
 After publishing, verify the public `/api/health` endpoint, the loaded 3D scene and camera controls, and a preview-to-queue interaction on the custom domain. A successful local build or upload alone does not establish that visitors have received the latest version.
 
@@ -50,7 +66,7 @@ The script POSTs to `/api/admin` with JSON `{"action":"pause"}`, `resume`, `skip
 
 ## Show behavior
 
-- A prompt is at most 280 characters. The model can compose bounded shape-and-motion instructions; it cannot execute arbitrary code or load external resources.
+- A prompt is at most 280 characters. Shape generation uses bounded drawing instructions; image generation stores validated window pixels. Neither executes model-generated code or fetches model-supplied image URLs.
 - Preview privately, then explicitly submit that exact server-approved clip.
 - AI previews expire after 30 minutes. Server-curated examples use `expiresAt: 0` and remain available in an open page; that exemption cannot be used by AI clips.
 - One pending or playing turn per session; at most 10 waiting turns; submissions are idempotent.

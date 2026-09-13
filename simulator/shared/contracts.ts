@@ -9,7 +9,9 @@ export type Frame = RGB[][];
 export type Shape = 'heart' | 'star' | 'circle' | 'ring' | 'rectangle' | 'line' | 'rain' | 'sparkles' | 'wave' | 'rocket' | 'smile' | 'socks';
 export type Motion = 'still' | 'pulse' | 'rise' | 'fall' | 'orbit' | 'sway' | 'spin';
 export interface Layer { shape: Shape; color: string; x: number; y: number; size: number; motion: Motion; speed: number; phase: number; }
-export interface Scene { version: 1; background: string; layers: Layer[]; }
+/** Opaque display pixels in top-to-bottom row order, then left-to-right columns. */
+export interface Raster { pixels: RGB[][]; motion: 'still' | 'pulse'; }
+export interface Scene { version: 1; background: string; layers: Layer[]; raster?: Raster; }
 export interface Clip { id: string; title: string; interpretation: string; scene: Scene; createdAt: number; expiresAt: number; source: 'ai' | 'example'; }
 export interface QueueItem { id: string; clip: Clip; submittedAt: number; votes: number; voted: boolean; mine: boolean; scheduledAt: number; }
 export interface ShowState { serverTime: number; mode: 'simulator' | 'building'; paused: boolean; phase: 'invitation' | 'playing'; current: QueueItem | null; queue: QueueItem[]; phaseStartedAt: number; phaseEndsAt: number; nextStartAt: number | null; completed: {id: string; title: string; finishedAt: number}[]; viewers?: number; generationAvailable: boolean; queueLimit: number; }

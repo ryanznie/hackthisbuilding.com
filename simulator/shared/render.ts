@@ -1,4 +1,4 @@
-import { COLS, DOMAIN, ROWS, URL_PASS_MS, type Clip, type Frame, type Layer, type Motion, type RGB, type Scene, type Shape } from './contracts';
+import { COLS, DOMAIN, ROWS, URL_PASS_MS, type Clip, type Frame, type Layer, type Motion, type RGB, type Raster, type Scene, type Shape } from './contracts';
 
 const SHAPES = new Set<Shape>(['heart', 'star', 'circle', 'ring', 'rectangle', 'line', 'rain', 'sparkles', 'wave', 'rocket', 'smile', 'socks']);
 const MOTIONS = new Set<Motion>(['still', 'pulse', 'rise', 'fall', 'orbit', 'sway', 'spin']);
@@ -28,15 +28,37 @@ function color(input: unknown): string {
   return input.toLowerCase();
 }
 
+function validateRaster(input: unknown): Raster {
+  const raster = record(input, 'Raster');
+  exactKeys(raster, ['pixels', 'motion'], 'Raster');
+  if (raster.motion !== 'still' && raster.motion !== 'pulse') throw new Error('Unsupported raster motion.');
+  if (!Array.isArray(raster.pixels) || raster.pixels.length !== ROWS) throw new Error(`Raster needs exactly ${ROWS} rows.`);
+  return {
+    motion: raster.motion,
+    // Array.from visits sparse entries too; holes must not bypass validation.
+    pixels: Array.from(raster.pixels, (row): RGB[] => {
+      if (!Array.isArray(row) || row.length !== COLS) throw new Error(`Each raster row needs exactly ${COLS} pixels.`);
+      return Array.from(row, (pixel): RGB => {
+        if (!Array.isArray(pixel) || pixel.length !== 3) throw new Error('Every raster pixel needs exactly three RGB channels.');
+        const channels = Array.from(pixel);
+        if (channels.some(channel => typeof channel !== 'number' || !Number.isInteger(channel) || channel < 0 || channel > 255)) throw new Error('Raster RGB channels must be integers between 0 and 255.');
+        return [channels[0], channels[1], channels[2]];
+      });
+    }),
+  };
+}
+
 /** The only executable display vocabulary. No scripts, HTML, or remote resources. */
 export function validateScene(input: unknown): Scene {
   const scene = record(input, 'Scene');
-  exactKeys(scene, ['version', 'background', 'layers'], 'Scene');
+  exactKeys(scene, ['version', 'background', 'layers', 'raster'], 'Scene');
   if (scene.version !== 1) throw new Error('Unsupported scene version.');
-  if (!Array.isArray(scene.layers) || scene.layers.length < 1 || scene.layers.length > 8) throw new Error('A scene needs between one and eight layers.');
+  const raster = 'raster' in scene ? validateRaster(scene.raster) : undefined;
+  if (!Array.isArray(scene.layers) || scene.layers.length < (raster ? 0 : 1) || scene.layers.length > 8) throw new Error('A scene needs a raster or one to eight shape layers.');
   return {
     version: 1,
     background: color(scene.background),
+    ...(raster ? { raster } : {}),
     layers: scene.layers.map((input, index): Layer => {
       const layer = record(input, `Layer ${index + 1}`);
       exactKeys(layer, ['shape', 'color', 'x', 'y', 'size', 'motion', 'speed', 'phase'], 'Layer');
@@ -133,8 +155,14 @@ function shapeCoverage(shape: Shape, dx: number, dy: number, size: number, time:
 
 /** Pure, deterministic RGB renderer; coordinates are columns 0–8 and rows 0–16. */
 export function renderScene(scene: Scene, elapsedMs: number): Frame {
-  const frame = blank(rgb(scene.background));
   const time = Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) / 1000 : 0;
+  // Raster pixels are an opaque base, with optional shapes composited above.
+  // A five-second breath changes brightness only from 80% to 100%; it never
+  // flashes or resamples the already tiny image. Still images preserve RGB.
+  const rasterBrightness = scene.raster?.motion === 'pulse' ? 0.9 + 0.1 * Math.cos(time * TAU / 5) : 1;
+  const frame: Frame = scene.raster
+    ? scene.raster.pixels.map(row => row.map((pixel): RGB => [Math.round(pixel[0] * rasterBrightness), Math.round(pixel[1] * rasterBrightness), Math.round(pixel[2] * rasterBrightness)]))
+    : blank(rgb(scene.background));
   const samples = [-0.25, 0.25];
   scene.layers.slice(0, 8).forEach((layer, index) => {
     const channels = rgb(layer.color);

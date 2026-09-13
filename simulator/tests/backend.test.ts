@@ -122,8 +122,22 @@ test('generation fails closed and moderates generated public metadata separately
     calls++;
     return { response: JSON.stringify(calls === 1 ? { allowed: true } : calls === 2 ? { title: 'Heart', interpretation: 'A simple heart pulses.', scene } : { allowed: false }) };
   } };
-  await assert.rejects(generateAnimation(ai, 'a red heart'), (error: unknown) => error instanceof ApiFailure && error.code === 'PROMPT_REJECTED');
+  await assert.rejects(generateAnimation(ai, 'a red heart'), (error: unknown) => error instanceof ApiFailure && error.code === 'OUTPUT_REJECTED');
   assert.equal(calls, 3);
+});
+
+test('benign logo requests still pass both moderation gates and logos never bypass rejection', async () => {
+  for (const prompt of ['show the Sundai logo', 'show the Red Sox logo']) {
+    let calls = 0;
+    const ai: AIBinding = { run: async () => ({ response: ++calls === 2 ? { title: 'Community celebration', interpretation: 'A simple colorful emblem.', scene } : { allowed: true } }) };
+    const result = await generateAnimation(ai, prompt);
+    assert.equal(result.title, 'Community celebration');
+    assert.equal(calls, 3);
+  }
+  let deniedCalls = 0;
+  await assert.rejects(generateAnimation({ run: async () => { deniedCalls++; return { response: { allowed: false } }; } }, 'Show the Sundai logo made from hateful symbols'), (error: unknown) => error instanceof ApiFailure && error.code === 'PROMPT_REJECTED');
+  assert.equal(deniedCalls, 1);
+  await assert.rejects(moderate({ run: async () => ({ response: 'not JSON' }) }, 'show the Sundai logo'), (error: unknown) => error instanceof ApiFailure && error.code === 'MODERATION_FAILED');
 });
 
 test('current Workers AI parsed-object responses and choices content remain bounded and schema checked', async () => {
@@ -177,6 +191,21 @@ test('atomic concurrent submit returns one stored clip and stable idempotency re
   assert.equal(retried.state.queue.length, 1);
   assert.equal((await api(restart, 'submit', owner, { ...body, requestId: 'second-slot' })).status, 409);
   assert.equal((await api(restart, 'submit', other, { clipId: 'client-invented', requestId: 'invalid' })).status, 404);
+});
+
+test('a full preview gallery rejects before paid inference starts', async () => {
+  let calls = 0;
+  const { ctx, storage, env } = setup({ AI: { run: async () => { calls++; return { response: { allowed: true } }; } } });
+  const example = exampleClips()[0];
+  const clips = Object.fromEntries(Array.from({ length: 250 }, (_, index) => {
+    const id = `stored_${index}`;
+    return [id, { owner, clip: { ...example, id, source: 'ai', expiresAt: Date.now() + PREVIEW_TTL_MS } }];
+  }));
+  await storage.put('show', { version: 1, schedule: initialSchedule(Date.now()), clips, examples: [], receipts: {}, limits: {} });
+  const response = await api(new BuildingShow(ctx, env), 'preview', owner, { prompt: 'a red heart' });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json() as any).code, 'PREVIEW_CAPACITY');
+  assert.equal(calls, 0);
 });
 
 test('curated examples remain usable after thirty minutes while AI previews still expire', async t => {
