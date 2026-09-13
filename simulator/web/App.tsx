@@ -70,7 +70,7 @@ export default function App() {
   const [busyQueueId, setBusyQueueId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [queueError, setQueueError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState<{ type: 'submission'; id: string } | { type: 'cancel' } | null>(null);
   const [submittedIds, setSubmittedIds] = useState<string[]>([]);
   const [showHow, setShowHow] = useState(false);
   const [examplesError, setExamplesError] = useState(false);
@@ -123,6 +123,17 @@ export default function App() {
   const myQueue = waitingQueue.find(item => item.mine);
   const myPlaying = liveItem?.mine;
   const completedMine = state?.completed.find(item => submittedIds.includes(item.id));
+  const noticeText = notice?.type === 'cancel'
+    ? 'Your animation was removed from the queue.'
+    : notice?.type === 'submission'
+      ? liveItem?.id === notice.id
+        ? 'Your animation is playing on the shared simulator.'
+        : waitingQueue.some(item => item.id === notice.id)
+          ? state?.paused ? 'Your animation is queued. The shared show is paused.' : 'You’re in the queue. Your countdown is live below.'
+          : state?.completed.some(item => item.id === notice.id)
+            ? 'Your animation played on the shared simulator. Make another idea when you’re ready.'
+            : ''
+      : '';
   const phaseRemaining = Math.max(0, (liveItem ? liveItem.scheduledAt + CLIP_MS : state?.phaseEndsAt || now) - now);
   const previewProgress = ((tick - previewStartedAt) % CLIP_MS) / CLIP_MS;
   const liveProgress = livePlaying ? 1 - phaseRemaining / CLIP_MS : ((now - liveStartedAt) % URL_PASS_MS) / URL_PASS_MS;
@@ -134,7 +145,7 @@ export default function App() {
   async function generate(event: React.FormEvent) {
     event.preventDefault();
     if (prompt.trim().length < 3 || generating) return;
-    setGenerating(true); setError(''); setNotice('');
+    setGenerating(true); setError(''); setNotice(null);
     try {
       const { clip } = await api<{ clip: Clip }>('/api/preview', { prompt: prompt.trim() });
       setPreview(clip); setPreviewStartedAt(Date.now()); setScreen('preview'); requestId.current = null;
@@ -143,18 +154,18 @@ export default function App() {
   }
 
   function selectExample(clip: Clip) {
-    setPreview(clip); setPreviewStartedAt(Date.now()); setScreen('preview'); setPrompt(''); setError(''); setNotice(''); requestId.current = null;
+    setPreview(clip); setPreviewStartedAt(Date.now()); setScreen('preview'); setPrompt(''); setError(''); setNotice(null); requestId.current = null;
   }
 
   async function submit() {
     if (!preview || submitting) return;
-    setSubmitting(true); setError(''); setNotice('');
+    setSubmitting(true); setError(''); setNotice(null);
     if (requestId.current?.clipId !== preview.id) requestId.current = { clipId: preview.id, id: crypto.randomUUID() };
     try {
       const started = Date.now();
       const result = await api<{ id: string; state: ShowState }>('/api/submit', { clipId: preview.id, requestId: requestId.current.id });
       setState(result.state); setClockOffset(result.state.serverTime - (started + Date.now()) / 2); setSubmittedIds(ids => [...ids, result.id]); requestId.current = null;
-      setScreen('live'); setNotice('You’re in the queue. Your countdown is live below.');
+      setScreen('live'); setNotice({ type: 'submission', id: result.id });
     } catch (err) { setError(err instanceof Error ? err.message : 'We could not add your animation. Please try again.'); }
     finally { setSubmitting(false); }
   }
@@ -165,7 +176,7 @@ export default function App() {
       const started = Date.now();
       const result = await api<ShowState>(`/api/${action}`, { id });
       setState(result); setClockOffset(result.serverTime - (started + Date.now()) / 2);
-      if (action === 'cancel') { setNotice('Your animation was removed from the queue.'); requestId.current = null; }
+      if (action === 'cancel') { setNotice({ type: 'cancel' }); requestId.current = null; }
     } catch (err) { setQueueError(err instanceof Error ? err.message : 'Please try again.'); }
     finally { setBusyQueueId(null); }
   }
@@ -201,7 +212,7 @@ export default function App() {
           {state && !state.generationAvailable && !error && <p className="service-note">Custom prompts are temporarily unavailable. You can still preview and submit an example below.</p>}
           <div className="examples"><p className="section-label mono">OR START WITH AN EXAMPLE</p><div className="example-buttons">{examples.map((clip, index) => <button key={clip.id} className={preview?.id === clip.id ? 'selected' : ''} onClick={() => selectExample(clip)} disabled={generating}><span className={`example-symbol example-symbol--${index}`} aria-hidden="true">{['♡', '↗', '≈', '✧'][index % 4]}</span>{clip.title}</button>)}</div>{examplesError && <p className="input-hint">Examples could not be loaded. Refresh to try again.</p>}{!examples.length && !examplesError && <p className="input-hint">Loading examples…</p>}</div>
           <div className="submit-section"><div className="preview-heading"><span className="step-number mono">02</span><h2>{preview ? 'Like what you see?' : 'Preview it. Make it yours.'}</h2><span className="duration-tag mono">5 SEC</span></div>{preview ? <><p className="preview-description">{preview.interpretation}</p><div className="preview-meta"><span className="mono">{preview.source === 'example' ? 'READY-MADE EXAMPLE' : 'PROMPT CHECKED'}</span><button className="text-button" onClick={() => { setScreen('preview'); setPreviewStartedAt(Date.now()); }}><Icon name="play" size={12} />Replay</button></div></> : <p className="preview-description">Your animation will play on the building preview. Nothing joins the public show until you submit.</p>}<button className="submit-button" onClick={submit} disabled={!preview || submitting || !ready || alreadySubmitted || expired || !!state?.paused}>{submitting ? <><span className="spinner" />Joining queue…</> : alreadySubmitted ? <><Icon name="check" />In the shared queue</> : state?.paused ? 'The shared show is paused' : expired ? 'Preview expired · create a new one' : <><span>Submit to shared show</span><Icon name="arrow" /></>}</button><p className="submit-hint">First come, first shown. {state?.queue.length ? `Join ${state.queue.length} ${state.queue.length === 1 ? 'idea' : 'ideas'} in the queue.` : 'Be the next idea on the building.'}</p></div>
-          {notice && <p className="form-message form-message--success" role="status"><Icon name="check" size={16} />{notice}</p>}
+          {noticeText && <p className="form-message form-message--success" role="status"><Icon name="check" size={16} />{noticeText}</p>}
         </aside>
       </section>
 
