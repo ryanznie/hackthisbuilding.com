@@ -1,73 +1,81 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CLIP_MS, URL_PASS_MS, type Clip, type Scene } from '../shared/contracts';
+import { CLIP_MS, TURN_MS, type Clip, type Scene } from '../shared/contracts';
 import { exampleClips } from '../shared/render';
-import { initialSchedule, nextInvitationSlot, advance, reschedule, isReserved, removeWaiting, showState, stopCurrent, type Entry } from '../worker/schedule';
-import worker, { BuildingShow, boundReceipts, checkOrigin, consumeGenerationLimits, consumeMutationLimits, readBody, type Env } from '../worker/index';
+import { initialSchedule, nextInvitationSlot, advance, reschedule, isReserved, migrateSchedule, removeWaiting, showState, stopCurrent, type Entry } from '../worker/schedule';
+import worker, { BuildingShow, boundReceipts, checkOrigin, consumeGenerationLimits, consumeMutationLimits, consumePongInputLimits, readBody, type Env } from '../worker/index';
 import { ApiFailure, checkPrompt, generateAnimation, MODEL, moderate, parseModelJson, PREVIEW_TTL_MS, type AIBinding } from '../worker/generation';
 
 const scene: Scene = { version: 1, background: '#030711', layers: [{ shape: 'heart', color: '#FF595E', x: 4, y: 8, size: 5, motion: 'pulse', speed: 0.5, phase: 0 }] };
 const clip: Clip = { id: 'approved', title: 'Heart', interpretation: 'A simple heart pulses.', scene, createdAt: 0, expiresAt: 999999, source: 'ai' };
 const owner = 'a'.repeat(64);
 const other = 'b'.repeat(64);
-function entry(id: string, visitor = owner): Entry { return { id, owner: visitor, clip: structuredClone(clip), submittedAt: 0, scheduledAt: 0, voters: [] }; }
+function entry(id: string, visitor = owner): Entry { return { id, owner: visitor, kind: 'animation', durationMs: TURN_MS, clip: structuredClone(clip), submittedAt: 0, scheduledAt: 0, voters: [] }; }
 
-test('busy show has exact five-second clips, two full URL passes, and stable FIFO', () => {
+test('mixed projects occupy exact thirty-second turns while preview clips remain five seconds', () => {
   const state = initialSchedule(0);
-  state.queue.push(entry('first'), entry('second', other));
+  state.queue.push(entry('first'), { ...entry('second', other), kind: 'pong' });
   reschedule(state, 0);
-  assert.deepEqual(state.queue.map(item => item.scheduledAt), [24000, 53000]);
-  advance(state, 23999);
+  assert.equal(CLIP_MS, 5000);
+  assert.equal(TURN_MS, 30000);
+  assert.deepEqual(state.queue.map(item => item.scheduledAt), [5000, 35000]);
+  advance(state, 4999);
   assert.equal(state.current, null);
-  advance(state, 24000);
-  assert.equal(showState(state, owner, 24000, true).current?.id, 'first');
-  assert.equal(state.phaseEndsAt - state.phaseStartedAt, CLIP_MS);
-  advance(state, 29000);
-  assert.equal(state.current, null);
-  assert.equal(state.phaseEndsAt - state.phaseStartedAt, 2 * URL_PASS_MS);
-  advance(state, 53000);
-  assert.equal(showState(state, owner, 53000, true).current?.id, 'second');
-  advance(state, 58000);
+  advance(state, 5000);
+  assert.equal(showState(state, owner, 5000, true).current?.id, 'first');
+  assert.equal(state.phaseEndsAt - state.phaseStartedAt, TURN_MS);
+  advance(state, 35000);
+  const second = showState(state, owner, 35000, true).current;
+  assert.equal(second?.id, 'second');
+  assert.equal(second?.kind, 'pong');
+  assert.equal(state.phaseEndsAt - state.phaseStartedAt, TURN_MS);
+  advance(state, 65000);
   assert.deepEqual(state.completed.map(item => item.id), ['second', 'first']);
-  assert.equal(state.phaseEndsAt, 82000);
+  assert.equal(state.current, null);
+  assert.equal(state.phaseEndsAt, 0);
 });
 
-test('restart catch-up does not replay clips and idle arrivals get notice plus a complete URL pass', () => {
+test('restart catch-up does not replay turns and idle arrivals receive five seconds notice', () => {
   const state = initialSchedule(0);
   state.queue.push(entry('first'), entry('second'));
   reschedule(state, 0);
   const restored = JSON.parse(JSON.stringify(state));
-  advance(restored, 120000);
+  advance(restored, 200000);
   assert.equal(restored.current, null);
   assert.equal(restored.queue.length, 0);
   assert.equal(restored.completed.length, 2);
-  advance(restored, 120001);
+  advance(restored, 200001);
   assert.equal(restored.completed.length, 2);
   const start = nextInvitationSlot(0, 121000);
   assert.ok(start - 121000 >= 5000);
-  assert.equal(start % URL_PASS_MS, 0);
+  assert.equal(start, 126000);
 });
 
 test('reserved countdown cannot be canceled; an earlier cancellation promotes fairly', () => {
   const state = initialSchedule(0);
-  state.queue.push(entry('first'), entry('second'));
+  state.queue.push(entry('first'), entry('second'), entry('third'));
   reschedule(state, 0);
-  assert.equal(isReserved(state, 'first', 18999), false);
-  assert.equal(isReserved(state, 'first', 19000), true);
-  assert.equal(isReserved(state, 'second', 19000), false);
-  removeWaiting(state, 'first', 18000);
-  assert.equal(state.queue[0].id, 'second');
-  assert.equal(state.queue[0].scheduledAt, 24000);
+  advance(state, 5000);
+  assert.equal(isReserved(state, 'second', 29999), false);
+  assert.equal(isReserved(state, 'second', 30000), true);
+  assert.equal(isReserved(state, 'third', 30000), false);
+  removeWaiting(state, 'second', 29000);
+  assert.equal(state.queue[0].id, 'third');
+  assert.equal(state.queue[0].scheduledAt, 35000);
+  state.queue.push(entry('fourth'));
+  reschedule(state, 32000);
+  removeWaiting(state, 'fourth', 32000);
+  assert.equal(state.queue[0].scheduledAt, 35000);
 });
 
 test('pause drops interrupted playback, nulls estimates, and resume restarts invitations', () => {
   const state = initialSchedule(0);
   state.queue.push(entry('first'), entry('second'));
   reschedule(state, 0);
-  advance(state, 25000);
+  advance(state, 6000);
   state.paused = true;
-  stopCurrent(state, 25000);
-  const paused = showState(state, owner, 25000, true);
+  stopCurrent(state, 6000);
+  const paused = showState(state, owner, 6000, true);
   assert.equal(paused.current, null);
   assert.equal(paused.nextStartAt, null);
   assert.equal(paused.queue[0].scheduledAt, 0);
@@ -75,7 +83,69 @@ test('pause drops interrupted playback, nulls estimates, and resume restarts inv
   assert.equal(state.completed.length, 0);
   state.paused = false;
   stopCurrent(state, 100000);
-  assert.equal(state.queue[0].scheduledAt, 124000);
+  assert.equal(state.queue[0].scheduledAt, 105000);
+});
+
+test('late arrivals receive notice, and migration preserves a legacy active end and reserved start', () => {
+  const state = initialSchedule(0);
+  state.queue.push(entry('first')); reschedule(state, 0); advance(state, 5000);
+  state.queue.push(entry('late')); reschedule(state, 33000);
+  assert.equal(state.queue[0].scheduledAt, 38000);
+  advance(state, 35000);
+  assert.equal(state.current, null);
+  assert.equal(state.phaseEndsAt, 38000);
+  const legacy = initialSchedule(0);
+  legacy.current = { ...entry('legacy'), kind: undefined, durationMs: undefined, scheduledAt: 24000 };
+  legacy.phaseStartedAt = 24000; legacy.phaseEndsAt = 29000;
+  legacy.queue = [{ ...entry('next'), kind: undefined, durationMs: undefined, scheduledAt: 32000 }];
+  migrateSchedule(legacy, 28000);
+  assert.equal(legacy.current.durationMs, 5000);
+  assert.equal(legacy.phaseEndsAt, 29000);
+  assert.equal(legacy.queue[0].durationMs, TURN_MS);
+  assert.equal(legacy.queue[0].scheduledAt, 32000);
+});
+
+test('migration shortens every waiting sixty-second project without changing the active end', () => {
+  const state = initialSchedule(0);
+  state.current = { ...entry('active'), durationMs: 60000, scheduledAt: 5000 };
+  state.phaseStartedAt = 5000;
+  state.phaseEndsAt = 65000;
+  state.queue = [
+    { ...entry('lights'), kind: 'animation', durationMs: 60000, scheduledAt: 65000 },
+    { ...entry('pong'), kind: 'pong', durationMs: 60000, scheduledAt: 125000 },
+    { ...entry('mario'), kind: 'mario', durationMs: 60000, scheduledAt: 185000 },
+  ];
+  migrateSchedule(state, 10000);
+  assert.equal(state.current.durationMs, 60000);
+  assert.equal(state.phaseStartedAt, 5000);
+  assert.equal(state.phaseEndsAt, 65000);
+  assert.deepEqual(state.queue.map(item => item.durationMs), [30000, 30000, 30000]);
+  assert.deepEqual(state.queue.map(item => item.scheduledAt), [65000, 95000, 125000]);
+  const migrated = structuredClone(state);
+  migrateSchedule(state, 10001);
+  assert.deepEqual(state, migrated, 'the existing active turn must not retrigger migration on every restart');
+  advance(state, 65000);
+  assert.equal(state.current.id, 'lights');
+  assert.equal(state.phaseEndsAt, 95000);
+});
+
+test('thirty-second migration preserves a reserved start and paused queue state', () => {
+  const reserved = initialSchedule(0);
+  reserved.queue = [
+    { ...entry('next'), durationMs: 60000, scheduledAt: 4000 },
+    { ...entry('later'), durationMs: 60000, scheduledAt: 64000 },
+  ];
+  migrateSchedule(reserved, 1000);
+  assert.deepEqual(reserved.queue.map(item => item.scheduledAt), [4000, 34000]);
+  assert.equal(reserved.phaseEndsAt, 4000);
+  const paused = initialSchedule(0);
+  paused.paused = true;
+  paused.queue = [{ ...entry('paused'), durationMs: 60000, scheduledAt: 0 }];
+  migrateSchedule(paused, 1000);
+  assert.equal(paused.paused, true);
+  assert.equal(paused.queue[0].durationMs, 30000);
+  assert.equal(paused.queue[0].scheduledAt, 0);
+  assert.equal(paused.phaseEndsAt, 0);
 });
 
 test('generation limits resist cookie rotation and fail atomically', () => {
@@ -155,9 +225,10 @@ test('current Workers AI parsed-object responses and choices content remain boun
 
 class MemoryStorage {
   value = new Map<string, unknown>();
+  writes = 0;
   alarm: number | null = null;
   async get<T>(key: string): Promise<T | undefined> { return structuredClone(this.value.get(key)) as T | undefined; }
-  async put(key: string, value: unknown) { this.value.set(key, structuredClone(value)); }
+  async put(key: string, value: unknown) { this.writes++; this.value.set(key, structuredClone(value)); }
   async setAlarm(time: number) { this.alarm = time; }
   async deleteAlarm() { this.alarm = null; }
 }
@@ -171,6 +242,81 @@ function setup(extra: Partial<Env> = {}) {
 function api(show: BuildingShow, path: string, visitor = owner, body?: unknown, token?: string) {
   return show.fetch(new Request(`https://hackthisbuilding.com/api/${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'x-htb-visitor': visitor, 'x-htb-ip': 'c'.repeat(64), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }));
 }
+
+test('Pong and animation admissions share FIFO, ownership limits, idempotency and exact turn boundaries', async t => {
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, 'now', () => now);
+  const { show } = setup();
+  const { clips } = await (await api(show, 'examples')).json() as { clips: Clip[] };
+  const joinBody = { requestId: 'pong-turn' };
+  const joined = await (await api(show, 'pong/join', owner, joinBody)).json() as any;
+  assert.equal(joined.state.queue[0].kind, 'pong');
+  assert.equal(joined.state.queue[0].durationMs, TURN_MS);
+  assert.equal(joined.state.queue[0].scheduledAt, now + 5000);
+  const retried = await (await api(show, 'pong/join', owner, joinBody)).json() as any;
+  assert.equal(retried.id, joined.id);
+  assert.equal((await api(show, 'submit', owner, { clipId: clips[0].id, requestId: 'another-kind' })).status, 409);
+  const animation = await (await api(show, 'submit', other, { clipId: clips[0].id, requestId: 'animation-turn' })).json() as any;
+  assert.deepEqual(animation.state.queue.map((item: any) => item.kind), ['pong', 'animation']);
+  assert.equal(animation.state.queue[1].scheduledAt, now + 35000);
+  assert.equal((await api(show, 'pong/input', owner, { id: joined.id, x: 3, sequence: 0 })).status, 409);
+  now += 5000;
+  const playing = await (await api(show, 'state')).json() as any;
+  assert.equal(playing.current.id, joined.id);
+  assert.equal(playing.pong.entryId, joined.id);
+  now += TURN_MS;
+  const next = await (await api(show, 'state')).json() as any;
+  assert.equal(next.current.id, animation.id);
+  assert.equal(next.pong, null);
+  assert.equal((await api(show, 'pong/input', owner, { id: joined.id, x: 6, sequence: now })).status, 409);
+  now += TURN_MS;
+  const idle = await (await api(show, 'state')).json() as any;
+  assert.equal(idle.current, null);
+  assert.equal(idle.nextStartAt, null);
+  assert.equal(idle.phaseEndsAt, 0);
+  assert.equal(idle.completed.length, 2);
+});
+
+test('Pong controls authenticate the active owner, preserve sequence across restart, and stop when paused', async t => {
+  let now = 1_800_100_000_000;
+  t.mock.method(Date, 'now', () => now);
+  const { show, ctx, env, storage } = setup();
+  const joined = await (await api(show, 'pong/join', owner, { requestId: 'play' })).json() as any;
+  now += 5000;
+  const initial = await (await api(show, 'state')).json() as any;
+  const writes = storage.writes;
+  now += 124;
+  const beforeTick = await (await api(show, 'state')).json() as any;
+  assert.deepEqual(beforeTick.pong.state, initial.pong.state);
+  assert.equal(storage.writes, writes);
+  now++;
+  const afterTick = await (await api(show, 'state')).json() as any;
+  assert.equal(afterTick.pong.state.tickAt, initial.pong.state.tickAt + 125);
+  assert.equal(storage.writes, writes + 1);
+  assert.equal((await api(show, 'pong/input', other, { id: joined.id, x: 6, sequence: now })).status, 403);
+  assert.equal((await api(show, 'pong/input', owner, { id: 'old-turn', x: 6, sequence: now })).status, 409);
+  for (const x of [-1, 7, 1.5]) assert.equal((await api(show, 'pong/input', owner, { id: joined.id, x, sequence: now })).status, 400);
+  const moved = await (await api(show, 'pong/input', owner, { id: joined.id, x: 6, sequence: now })).json() as any;
+  assert.equal(moved.pong.state.bottomX, 6);
+  const restored = new BuildingShow(ctx, env);
+  const stale = await (await api(restored, 'pong/input', owner, { id: joined.id, x: 0, sequence: now - 1 })).json() as any;
+  assert.equal(stale.pong.state.bottomX, 6);
+  const fresh = await (await api(restored, 'pong/input', owner, { id: joined.id, x: 1, sequence: now + 1 })).json() as any;
+  assert.equal(fresh.pong.state.bottomX, 1);
+  assert.equal('lastSequence' in fresh.pong, false);
+  const paused = await (await api(restored, 'admin', owner, { action: 'pause' }, 'test-admin-secret')).json() as any;
+  assert.equal(paused.pong, null);
+  assert.equal((await api(restored, 'pong/input', owner, { id: joined.id, x: 3, sequence: now + 2 })).status, 409);
+  await api(restored, 'admin', owner, { action: 'resume' }, 'test-admin-secret');
+  assert.equal((await api(restored, 'pong/input', owner, { id: joined.id, x: 3, sequence: now + 3 })).status, 409);
+});
+
+test('Pong input has a dedicated per-second budget without the ordinary forty-per-minute cap', () => {
+  const limits: Record<string, number[]> = {};
+  for (let second = 0; second < 3; second++) for (let i = 0; i < 20; i++) consumePongInputLimits(limits, owner, second * 1000);
+  assert.equal(limits[`pong-minute:${owner}`].length, 60);
+  assert.throws(() => consumePongInputLimits(limits, owner, 2001), (error: unknown) => error instanceof ApiFailure && error.code === 'INPUT_RATE_LIMITED');
+});
 
 test('atomic concurrent submit returns one stored clip and stable idempotency receipt across restart', async () => {
   const { show, ctx, env } = setup();

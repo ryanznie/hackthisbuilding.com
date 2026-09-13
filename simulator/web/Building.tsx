@@ -1,10 +1,10 @@
+import type { MarioState } from '../shared/mario';
 import { memo, useEffect, useRef } from 'react';
-import type { Frame, Scene } from '../shared/contracts';
-import { CLIP_MS, URL_PASS_MS } from '../shared/contracts';
-import { renderScene, urlFrame } from '../shared/render';
+import type { Frame, PongState, Scene } from '../shared/contracts';
+import { displayFrame } from '../shared/display';
 
 export type BuildingView = 'full' | 'windows' | 'river';
-interface Props { scene: Scene | null; startedAt: number; clockOffset: number; view: BuildingView; paused: boolean; preview: boolean; title: string; }
+interface Props { scene: Scene | null; startedAt: number; clockOffset: number; view: BuildingView; paused: boolean; preview: boolean; title: string; durationMs?: number; pong?: PongState | null; mario?: MarioState | null; }
 const W = 900, H = 750;
 
 function windowLight(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, rgb: number[], glow = true) {
@@ -129,6 +129,7 @@ export const Building = memo(function Building(props: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const current = useRef(props); current.current = props;
   const frozenElapsed = useRef(0);
+  const lastStartedAt = useRef(props.startedAt);
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const context = canvas.getContext('2d'); if (!context) return;
@@ -136,12 +137,11 @@ export const Building = memo(function Building(props: Props) {
     const drawFrame = (timestamp: number) => {
       if (timestamp - last >= 1000 / 30) {
         const p = current.current;
-        const elapsed = Date.now() + p.clockOffset - p.startedAt;
-        if (!p.paused) frozenElapsed.current = elapsed;
-        const t = p.paused ? frozenElapsed.current : elapsed;
-        const frame = p.scene && (p.preview || t < CLIP_MS)
-          ? renderScene(p.scene, Math.max(0, t) % CLIP_MS)
-          : urlFrame(Math.max(0, t - (p.scene ? CLIP_MS : 0)) % URL_PASS_MS);
+        const now = Date.now();
+        const elapsed = now + p.clockOffset - p.startedAt;
+        if (!p.paused || p.startedAt !== lastStartedAt.current) frozenElapsed.current = elapsed;
+        lastStartedAt.current = p.startedAt;
+        const frame = displayFrame(p, now, frozenElapsed.current);
         draw(context, frame, p.view); last = timestamp;
       }
       raf = requestAnimationFrame(drawFrame);

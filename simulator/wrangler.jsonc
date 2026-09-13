@@ -7,5 +7,5 @@
   "durable_objects": { "bindings": [{ "name": "SHOW", "class_name": "BuildingShow" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BuildingShow"] }],
   "observability": { "enabled": true },
-  "vars": { "DISPLAY_MODE": "simulator" }
+  "vars": { "DISPLAY_MODE": "simulator", "CONTENT_MODERATION": "off" }
 }

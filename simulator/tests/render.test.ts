@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { COLS, DOMAIN, ROWS, URL_PASS_MS, type Frame, type Layer } from '../shared/contracts';
-import { exampleClips, renderScene, urlFrame, validateScene } from '../shared/render';
+import { exampleClips, redSoxScoreScene, renderScene, textScene, urlFrame, validateScene } from '../shared/render';
 
 const baseLayer: Layer = { shape: 'heart', color: '#ff3377', x: 4, y: 8, size: 7, motion: 'pulse', speed: 0.8, phase: 0 };
 const input = () => ({ version: 1, background: '#02040b', layers: [{ ...baseLayer }] });
@@ -31,7 +31,7 @@ test('rejects malformed, executable, unbounded, and unsupported scene input', ()
   for (const scene of invalid) assert.throws(() => validateScene(scene));
 });
 
-test('every example is stable, visible, deterministic, and animated', () => {
+test('every example is stable, visible, deterministic, and preserves its motion', () => {
   const examples = exampleClips();
   assert.ok(examples.length >= 4);
   for (const id of ['example-heart', 'example-rocket', 'example-waves', 'example-stars', 'example-red-sox']) assert.ok(examples.some(clip => clip.id === id));
@@ -43,9 +43,95 @@ test('every example is stable, visible, deterministic, and animated', () => {
     validFrame(start);
     validFrame(later);
     assert.deepEqual(later, renderScene(scene, 1875));
-    assert.notDeepEqual(start, later, example.title);
+    if (scene.raster?.motion === 'still' && !scene.layers.length) assert.deepEqual(start, later, example.title);
+    else assert.notDeepEqual(start, later, example.title);
     assert.ok(start.flat().some(pixel => Math.max(...pixel) > 100), `${example.title} must light windows`);
   }
+});
+
+test('original Heart, Smile and Arrow presets retain their exact 9-by-17 bitmap masks', () => {
+  // Fixed rows from Kalyani:app/page.tsx, independent of the RGB adaptation.
+  const expected: Record<string, string[]> = {
+    Heart: ['000000000', '000000000', '011000110', '111101111', '111111111', '111111111', '011111110', '011111110', '001111100', '001111100', '000111000', '000111000', '000010000', '000000000', '000000000', '000000000', '000000000'],
+    Smile: ['000000000', '000111000', '011000110', '110000011', '100000001', '101101101', '101101101', '100000001', '100000001', '101000101', '100111001', '110000011', '011000110', '000111000', '000000000', '000000000', '000000000'],
+    Arrow: ['000010000', '000111000', '001111100', '011111110', '111111111', '000010000', '000010000', '000010000', '000010000', '000010000', '000010000', '000010000', '000010000', '000010000', '000010000', '000000000', '000000000'],
+  };
+  const examples = exampleClips();
+  for (const [title, mask] of Object.entries(expected)) {
+    const preset = examples.find(clip => clip.title === title);
+    assert.ok(preset, `${title} button must be available`);
+    assert.equal(preset.expiresAt, 0);
+    assert.deepEqual(renderScene(preset.scene, 0).map(row => row.map(pixel => pixel[0] > 100 ? '1' : '0').join('')), mask);
+    assert.deepEqual(renderScene(preset.scene, 0), renderScene(preset.scene, 59_999), 'original static art remains still throughout its turn');
+  }
+});
+
+test('Red Sox primary-logo adaptation keeps overlapping socks and contrasting seam/toe details', () => {
+  const clip = exampleClips().find(example => example.id === 'example-red-sox')!;
+  const frame = renderScene(clip.scene, 0);
+  assert.equal(clip.scene.raster?.motion, 'still');
+  assert.equal(clip.scene.layers.length, 0, 'extra generated sock or cuff layers must not obscure the reference');
+  const red = (pixel: number[]) => pixel[0] > 150 && pixel[1] < 100;
+  const white = (pixel: number[]) => pixel[0] > 240 && pixel[1] > 240;
+  assert.ok(frame[9].slice(1, 8).every(red), 'the overlapping sock body forms a continuous silhouette');
+  assert.ok(white(frame[10][4]) && white(frame[11][5]), 'the white diagonal seam distinguishes front and rear socks');
+  assert.ok(white(frame[11][8]) && white(frame[13][4]), 'separate toe patches point right and down');
+  assert.deepEqual(frame, renderScene(clip.scene, 59_999), 'logo stays readable throughout the turn');
+});
+
+test('score raster shows Boston above opponent with correct zero and two-digit glyphs', () => {
+  const scene = redSoxScoreScene({ bostonScore: 12, opponentScore: 0 });
+  const frame = renderScene(scene, 0);
+  validFrame(frame);
+  assert.deepEqual(frame.slice(2, 7).map(row => row.slice(1, 8).map(pixel => pixel[0] === 235 ? '1' : '0').join('')), ['0100111', '1100001', '0100111', '0100100', '1110111']);
+  assert.deepEqual(frame.slice(10, 15).map(row => row.slice(3, 6).map(pixel => pixel[0] === 245 ? '1' : '0').join('')), ['111', '101', '101', '101', '111']);
+  assert.equal(scene.raster?.motion, 'still');
+  assert.deepEqual(frame, renderScene(scene, 59_999), 'score snapshots never animate into a different value');
+  const largest = renderScene(redSoxScoreScene({ bostonScore: 99, opponentScore: 99 }), 0);
+  validFrame(largest);
+  assert.deepEqual(frame[8][4], [38, 51, 62]);
+});
+
+test('score helper rejects missing, fractional, negative and oversized values', () => {
+  for (const value of [undefined, null, '3', NaN, Infinity, -1, 1.5, 100]) {
+    assert.throws(() => redSoxScoreScene({ bostonScore: value as number, opponentScore: 0 }));
+    assert.throws(() => redSoxScoreScene({ bostonScore: 0, opponentScore: value as number }));
+  }
+});
+
+test('literal names scroll through a complete five-second loop deterministically', () => {
+  const scene = textScene('Wilson');
+  assert.equal(scene.text?.value, 'Wilson');
+  assert.equal(scene.layers.length, 0);
+  const hasInk = (time: number) => renderScene(scene, time).flat().some(pixel => pixel[0] === 236 && pixel[1] === 255 && pixel[2] === 93);
+  assert.equal(hasInk(0), false);
+  assert.ok(hasInk(500), 'beginning of the name enters from the right');
+  assert.ok(hasInk(4750), 'last letter remains visible before the loop ends');
+  assert.deepEqual(renderScene(scene, 0), renderScene(scene, 5000));
+  assert.deepEqual(renderScene(scene, 1875), renderScene(scene, 1875));
+  assert.notDeepEqual(renderScene(scene, 1000), renderScene(scene, 3000));
+  assert.deepEqual(renderScene(textScene('WILSON'), 1875), renderScene(scene, 1875));
+});
+
+test('every accepted printable non-space character has a visible bounded pixel glyph', () => {
+  for (let code = 33; code <= 126; code++) {
+    const frame = renderScene(textScene(String.fromCharCode(code)), 2500);
+    validFrame(frame);
+    assert.ok(frame.flat().some(pixel => pixel[0] === 236), `ASCII ${code} must not become a blank glyph`);
+  }
+  const scene = textScene('Hello, Wilson! 2026');
+  validFrame(renderScene(scene, 2500));
+  validFrame(renderScene(textScene('W'.repeat(48)), 4900));
+  validFrame(renderScene(textScene('<script>'), 2500));
+});
+
+test('text remains structural data with strict length, color, and field validation', () => {
+  const base = { version: 1, background: '#02040b', layers: [] };
+  for (const text of [null, undefined, {}, { value: '', color: '#ffffff' }, { value: '   ', color: '#ffffff' }, { value: 'a'.repeat(49), color: '#ffffff' }, { value: 'two\nlines', color: '#ffffff' }, { value: 'Jos\u00e9', color: '#ffffff' }, { value: 'Wilson', color: 'yellow' }, { value: 'Wilson', color: '#ffffff', script: 'run()' }]) assert.throws(() => validateScene({ ...base, text }));
+  assert.throws(() => validateScene({ ...base, text: { value: 'Wilson', color: '#ffffff' }, layers: Array(9).fill(baseLayer) }));
+  assert.equal(textScene('Wilson', '#FFFFFF').text?.color, '#ffffff');
+  const layered = validateScene({ ...input(), text: { value: 'Wilson', color: '#ffffff' }, raster: { pixels: rasterPixels(), motion: 'still' } });
+  validFrame(renderScene(layered, 2500));
 });
 
 test('all supported primitive and motion combinations produce safe frames', () => {
@@ -65,10 +151,15 @@ test('URL repeats after each full pass and includes both ends of the domain', ()
   const letters = (time: number) => urlFrame(time).slice(6, 11);
   assert.deepEqual(letters(2200), letters(2200 + URL_PASS_MS));
   assert.notDeepEqual(letters(2200), letters(5200));
-  const isInk = (pixel: number[]) => pixel[0] === 156;
+  const isInk = (pixel: number[]) => pixel[0] > 100;
   assert.ok(letters(650).flat().some(isInk), 'beginning of domain enters the display');
   assert.ok(letters(11400).flat().some(isInk), 'end of domain reaches the display');
   assert.ok(!letters(0).flat().some(isInk), 'pass starts with a clear left-to-right entry');
+  for (const [time, color] of [[1800, [250, 202, 76]], [4000, [105, 193, 250]], [7000, [247, 121, 166]], [11400, [245, 243, 230]]] as const) {
+    const ink = letters(time).flat().filter(isInk);
+    assert.ok(ink.length > 0);
+    assert.ok(ink.every(pixel => pixel.every((channel, index) => channel === color[index])), 'hack / this / building / .com retain their respective colors while scrolling');
+  }
 });
 
 const rasterPixels = (): Frame => Array.from({ length: ROWS }, (_, row) => Array.from({ length: COLS }, (_, col) => [row * 13, col * 27, 255 - row * 9]));

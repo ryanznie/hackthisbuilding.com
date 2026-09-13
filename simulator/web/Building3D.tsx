@@ -1,9 +1,10 @@
+import type { MarioState } from '../shared/mario';
 import { memo, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { CLIP_MS, FPS, URL_PASS_MS, type Scene } from '../shared/contracts';
-import { renderScene, urlFrame } from '../shared/render';
+import { FPS, type PongState, type Scene } from '../shared/contracts';
+import { displayFrame } from '../shared/display';
 import { cameraPreset, type CameraView } from './three/layout';
 import { createBuildingModel, disposeScene } from './three/model';
 
@@ -15,6 +16,8 @@ export interface Building3DProps {
   paused: boolean;
   preview: boolean;
   title: string;
+  durationMs?: number;
+  pong?: PongState | null; mario?: MarioState | null;
   cameraRevision?: number;
   onReady?: () => void;
   onError?: (error?: Error) => void;
@@ -199,13 +202,11 @@ export const Building3D = memo(function Building3D(props: Building3DProps) {
           // RGB sampling is shared with the 2D fallback and remains 30 FPS.
           // Camera interpolation and pointer response can render at 60 FPS.
           if (timestamp - lastFrame >= 1000 / FPS - 0.5 || p.startedAt !== lastStartedAt) {
-            const elapsed = Date.now() + p.clockOffset - p.startedAt;
+            const now = Date.now();
+            const elapsed = now + p.clockOffset - p.startedAt;
             if (!p.paused || p.startedAt !== lastStartedAt) frozenElapsed = elapsed;
             lastStartedAt = p.startedAt;
-            const time = Math.max(0, p.paused ? frozenElapsed : elapsed);
-            const frame = p.scene && (p.preview || time < CLIP_MS)
-              ? renderScene(p.scene, time % CLIP_MS)
-              : urlFrame(Math.max(0, time - (p.scene ? CLIP_MS : 0)) % URL_PASS_MS);
+            const frame = displayFrame(p, now, frozenElapsed);
             model.updateFrame(frame);
             lastFrame = timestamp;
           }

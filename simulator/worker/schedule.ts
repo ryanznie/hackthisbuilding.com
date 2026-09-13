@@ -1,4 +1,4 @@
-import { CLIP_MS, URL_PASS_MS, type Clip, type QueueItem, type ShowState } from '../shared/contracts';
+import { TURN_MS, type Clip, type ProjectKind, type QueueItem, type ShowState } from '../shared/contracts';
 
 export const COUNTDOWN_MS = 5000;
 export const QUEUE_LIMIT = 10;
@@ -6,6 +6,8 @@ export interface Entry {
   id: string;
   owner: string;
   clip: Clip;
+  kind?: ProjectKind;
+  durationMs?: number;
   submittedAt: number;
   scheduledAt: number;
   voters: string[];
@@ -20,13 +22,28 @@ export interface Schedule {
 }
 export function initialSchedule(now: number): Schedule {
   return { paused: false, current: null, queue: [], phaseStartedAt: now,
-    phaseEndsAt: now + 2 * URL_PASS_MS, completed: [] };
+    phaseEndsAt: 0, completed: [] };
 }
 
-/** Keep complete URL passes and give the next participant at least five seconds. */
-export function nextInvitationSlot(startedAt: number, now: number): number {
-  const earliest = Math.max(startedAt + 2 * URL_PASS_MS, now + COUNTDOWN_MS);
-  return startedAt + Math.ceil((earliest - startedAt) / URL_PASS_MS) * URL_PASS_MS;
+/** New arrivals receive five seconds of notice while idle art continues. */
+export function nextInvitationSlot(_startedAt: number, now: number): number {
+  return now + COUNTDOWN_MS;
+}
+
+/** Preserve an old active turn's end and a reserved start during deployment. */
+export function migrateSchedule(state: Schedule, now: number): void {
+  const legacy = !!state.current && (!state.current.kind || !state.current.durationMs)
+    || state.queue.some(item => !item.kind || item.durationMs !== TURN_MS);
+  if (state.current) {
+    state.current.kind ??= 'animation';
+    state.current.durationMs ??= Math.max(1, state.phaseEndsAt - state.phaseStartedAt);
+  }
+  state.queue.forEach(item => { item.kind ??= 'animation'; item.durationMs = TURN_MS; });
+  if (legacy) {
+    const head = state.queue[0];
+    if (head && !(head.scheduledAt >= now && head.scheduledAt - now <= COUNTDOWN_MS)) head.scheduledAt = 0;
+    reschedule(state, now);
+  } else if (!state.current && !state.queue.length) state.phaseEndsAt = 0;
 }
 
 export function reschedule(state: Schedule, now: number): void {
@@ -35,16 +52,16 @@ export function reschedule(state: Schedule, now: number): void {
     state.phaseEndsAt = 0;
     return;
   }
-  let first: number;
-  if (state.current) {
-    first = state.phaseEndsAt + 2 * URL_PASS_MS;
-  } else {
-    // Preserve a promised slot when the line changes. Call advance() first.
-    first = state.queue[0]?.scheduledAt || nextInvitationSlot(state.phaseStartedAt, now);
-    if (first < now) first = nextInvitationSlot(state.phaseStartedAt, now);
-    if (state.queue.length) state.phaseEndsAt = first;
-  }
-  state.queue.forEach((item, index) => { item.scheduledAt = first + index * (CLIP_MS + 2 * URL_PASS_MS); });
+  const promised = state.queue[0]?.scheduledAt ?? 0;
+  const available = state.current ? state.phaseEndsAt : now;
+  let start = promised > 0 && promised >= now && promised >= available
+    ? promised : Math.max(available, now + COUNTDOWN_MS);
+  state.queue.forEach(item => {
+    item.kind ??= 'animation'; item.durationMs ??= TURN_MS;
+    item.scheduledAt = start;
+    start += item.durationMs;
+  });
+  if (!state.current) state.phaseEndsAt = state.queue[0]?.scheduledAt ?? 0;
 }
 
 /** Timestamp-driven catch-up is deterministic across alarms, polls and restarts. */
@@ -57,11 +74,10 @@ export function advance(state: Schedule, now: number): void {
       state.completed = state.completed.slice(0, 20);
       state.current = null;
       state.phaseStartedAt = state.phaseEndsAt;
-      state.phaseEndsAt = state.phaseStartedAt + 2 * URL_PASS_MS;
+      state.phaseEndsAt = 0;
     }
     if (!state.queue.length) {
-      state.phaseEndsAt = Math.max(state.phaseStartedAt + 2 * URL_PASS_MS,
-        state.phaseStartedAt + (Math.floor((now - state.phaseStartedAt) / URL_PASS_MS) + 1) * URL_PASS_MS);
+      state.phaseEndsAt = 0;
       break;
     }
     if (now < state.queue[0].scheduledAt) {
@@ -70,7 +86,7 @@ export function advance(state: Schedule, now: number): void {
     }
     state.current = state.queue.shift()!;
     state.phaseStartedAt = state.current.scheduledAt;
-    state.phaseEndsAt = state.phaseStartedAt + CLIP_MS;
+    state.phaseEndsAt = state.phaseStartedAt + (state.current.durationMs ?? TURN_MS);
   }
 }
 
@@ -84,22 +100,22 @@ export function removeWaiting(state: Schedule, id: string, now: number): boolean
   if (index < 0) return false;
   const promisedFirst = state.queue[0]?.scheduledAt;
   state.queue.splice(index, 1);
-  if (state.queue[0] && promisedFirst && promisedFirst - now >= COUNTDOWN_MS) state.queue[0].scheduledAt = promisedFirst;
+  if (index === 0 && state.queue[0]) state.queue[0].scheduledAt = promisedFirst && promisedFirst - now >= COUNTDOWN_MS ? promisedFirst : 0;
   reschedule(state, now);
   return true;
 }
 
 export function stopCurrent(state: Schedule, now: number): void {
-  // An interrupted animation is never silently replayed or marked completed.
+  // An interrupted turn is never silently replayed or marked completed.
   state.current = null;
   state.phaseStartedAt = now;
-  state.phaseEndsAt = now + 2 * URL_PASS_MS;
+  state.phaseEndsAt = 0;
   state.queue.forEach(item => { item.scheduledAt = 0; });
   reschedule(state, now);
 }
 
 export function showState(state: Schedule, owner: string, now: number, generationAvailable: boolean): ShowState {
-  const publicItem = (item: Entry): QueueItem => ({ id: item.id, clip: item.clip,
+  const publicItem = (item: Entry): QueueItem => ({ id: item.id, kind: item.kind ?? 'animation', durationMs: item.durationMs ?? TURN_MS, clip: item.clip,
     submittedAt: item.submittedAt, scheduledAt: item.scheduledAt,
     votes: item.voters.length, voted: item.voters.includes(owner), mine: item.owner === owner });
   return { serverTime: now, mode: 'simulator', paused: state.paused,

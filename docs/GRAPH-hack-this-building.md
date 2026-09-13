@@ -2,6 +2,30 @@
 
 Implementation plan and execution record, September 13, 2026. Companion to [the PRD](PRD-hack-this-building.md). The user subsequently authorized building and deploying the app. Three component agents completed the implementation; the renderer agent also performed an independent backend review and live AI verification.
 
+## Current revision: mixed queue and Pong
+
+The September 13 follow-up replaces five-second public slots and URL interludes with 60-second turns for both lights and Pong. Five seconds remains the approved animation loop and minimum starting notice. Empty periods show synchronized positive art. The sections below record the original implementation graph; its timing assumptions are superseded by this revision and PRD v0.3.
+
+```mermaid
+flowchart LR
+  C[Shared kind, duration and Pong contracts] --> B[Backend: admission, clock, controls]
+  C --> F[Frontend: modes, ETA, mobile controls]
+  C --> R[Renderer: deterministic game and display]
+  B --> V[Integrate, test and inspect phone UI]
+  F --> V
+  R --> V
+  V --> D[Deploy Worker and Pages, verify public app]
+```
+
+| Lane | Exclusive write ownership | Evidence required |
+|---|---|---|
+| Backend | `worker/index.ts`, `worker/schedule.ts`, `tests/backend.test.ts` | Mixed-turn boundaries, ownership, input order, restart and legacy migration |
+| Frontend | `web/App.tsx`, `web/styles.css` | Typecheck, build, compact mode selection and controls |
+| Renderer | `shared/pong.ts`, `shared/display.ts`, both building renderers and their new tests | Deterministic game, loop timing, prediction cap and idle rotation |
+| Coordinator | Shared contracts, documentation, integration fixes, browser QA and publication | Phone layout, real turn and public deployment |
+
+No nested agents or model overrides. Backend and frontend read the frozen engine interface, so implementation runs concurrently; integrated verification waits for all lanes. Renderer performs a separate backend review after returning its implementation. Xander’s source was inspected read-only; this app does not open the upstream controller or claim its organizer instance.
+
 ## Dependency check
 
 | Step | Reads prior output? | Verdict |
