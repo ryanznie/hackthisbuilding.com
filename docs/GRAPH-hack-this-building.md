@@ -1,6 +1,6 @@
 # Hack This Building — Build graph
 
-Draft implementation plan, September 13, 2026. Companion to [the PRD](PRD-hack-this-building.md). Agent work has not been launched; named lanes are proposals for the team to adopt or map to human owners.
+Implementation plan and execution record, September 13, 2026. Companion to [the PRD](PRD-hack-this-building.md). The user subsequently authorized building and deploying the app. Three component agents completed the implementation; the renderer agent also performed an independent backend review and live AI verification.
 
 ## Dependency check
 
@@ -43,7 +43,7 @@ flowchart TD
 | VERIFY | A separate verifier checks exact clip identity/order/timing, then separately checks public UX, content rejection and operator recovery. It observes output and logs rather than repeating the implementer's reasoning. |
 | REDUCE | Coordinator merges shared contracts first, component work second; deduplicates findings by requirement ID; orders blockers before follow-ups. No scoring can waive a P0 invariant. |
 | CAP | Three workers concurrently plus coordinator; one bounded verifier after integration; no nested agents; one repair pass per failed acceptance item; at most ten findings per worker. |
-| REPORT | Component results, P0 acceptance matrix, deployment URL, unresolved issues, and returned/sent worker count. Current agent count: 0/0. |
+| REPORT | Component results, acceptance evidence, deployment URL, unresolved issues, and returned/sent worker count. Returned/sent component agents: 3/3. |
 | HUMAN GATE | Physical transmission is unreachable from the simulator deployment until the organizer approves and the operator supplies the hardware configuration. Domain purchase is complete. Repo publication and domain connection are user-authorized. |
 | FROZEN | 17 rows × 9 columns; at most 30 FPS; five-second clips; two full URL passes; exact approved clip is played; no generated code in the controller; one display writer; truthful queue status. |
 
@@ -61,4 +61,12 @@ Directory names are a proposed boundary, not a decision about the app framework.
 
 **First-run cost estimate:** assume 75% of work is parallel (`p = 0.75`) and three component workers (`N = 3`). Amdahl's law gives `1 / (0.25 + 0.75/3) = 2×` speedup, with an absolute ceiling of `4×`. A nominal four-hour serial task might take about two hours before unexpected access or integration delays; this is an estimate, not a measured result. The cap is 5,000 tokens per component worker, 5,000 for verification, and 8,000 for coordination: **28,000 total**, with no nested budgets. Maximum component fan-in is three. All nodes use the session's inherited model/reasoning tier; no overrides are proposed. Dollar cost is unestimated because the session's applicable billing rates are not available.
 
-The requested graph-engineering skill says, “Do not call `spawn_agent` until the user approves, unless their request already explicitly authorized planning and execution together.” This file is the reviewable launch plan; it does not block already authorized local documentation, GitHub publication, or domain work.
+## Execution retrospective
+
+The actual graph froze `shared/contracts.ts`, then ran frontend, backend, and renderer lanes concurrently. Files are under `simulator/`. The coordinator owned dependencies, contracts, Pages forwarding, DNS, integration, browser QA, and publication. Renderer verification found the event Wi-Fi rate limit was too restrictive, and real inference exposed Workers AI's newer parsed-object response format. Both were repaired and regression checked.
+
+The team pushed a separate root proof of concept during implementation. The coordinator preserved that commit and isolated the deployed app in `simulator/`; root TypeScript excludes the independent project. This avoided replacing the team's concurrent work.
+
+The production hosting path is Cloudflare Pages → service-bound Worker → one persisted Durable Object. Porkbun routes `www` by CNAME and the bare domain by HTTPS redirect. The organizer's protected simulator and physical building were not connected; the delivered canvas recreates the supplied screenshot with animated 17×9 windows and explicitly identifies itself as a browser simulator.
+
+Validation: 18 tests pass, TypeScript and production build pass, desktop and phone-sized browser layout inspected, and the live domain completed a real prompt → preview → submit → reaction → five-second playback → URL cycle. See [acceptance results](acceptance-results.md). All three agents returned; no nested agents were launched. The original cost and speed estimates above were planning assumptions, not measured usage or a claim of actual savings.
