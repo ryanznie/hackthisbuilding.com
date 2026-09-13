@@ -1,0 +1,11 @@
+{
+  "name": "hackthisbuilding",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-13",
+  "assets": { "directory": "./dist", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"] },
+  "ai": { "binding": "AI" },
+  "durable_objects": { "bindings": [{ "name": "SHOW", "class_name": "BuildingShow" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BuildingShow"] }],
+  "observability": { "enabled": true },
+  "vars": { "DISPLAY_MODE": "simulator" }
+}

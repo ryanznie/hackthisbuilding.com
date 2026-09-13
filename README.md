@@ -1,5 +1,10 @@
 # hackthisbuilding.com
-Hack MIT Green Building
+
+**Live app:** https://www.hackthisbuilding.com
+
+Prompt the MIT Green Building, preview a 17×9 light animation, and join a shared public show. This release renders the building in an interactive browser simulator.
+
+The live app is in [`simulator/`](simulator), built with React, Canvas, Cloudflare Workers AI, and a Durable Object queue. The team's separate proof of concept is preserved at the repository root. See [development and deployment](docs/DEPLOYMENT.md) for local setup and operator controls.
 
 ## Product plan
 
