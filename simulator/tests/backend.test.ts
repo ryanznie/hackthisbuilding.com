@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CLIP_MS, URL_PASS_MS, type Clip, type Scene } from '../shared/contracts';
+import { exampleClips } from '../shared/render';
 import { initialSchedule, nextInvitationSlot, advance, reschedule, isReserved, removeWaiting, showState, stopCurrent, type Entry } from '../worker/schedule';
 import worker, { BuildingShow, boundReceipts, checkOrigin, consumeGenerationLimits, consumeMutationLimits, readBody, type Env } from '../worker/index';
 import { ApiFailure, checkPrompt, generateAnimation, MODEL, moderate, parseModelJson, PREVIEW_TTL_MS, type AIBinding } from '../worker/generation';
@@ -208,6 +209,28 @@ test('curated examples remain usable after thirty minutes while AI previews stil
   const result = await submitted.json() as any;
   assert.equal(result.state.queue[0].clip.id, chosen.id);
   assert.equal(result.state.queue[0].clip.expiresAt, 0);
+});
+
+test('a deployed example catalog gains new definitions without changing existing approved preview IDs', async () => {
+  const { ctx, env, storage } = setup();
+  const definitions = exampleClips();
+  const legacyClips = definitions.slice(0, -1).map((example, index) => ({ ...example, id: `example_legacy_${index}`, createdAt: Date.now(), expiresAt: 0 }));
+  await storage.put('show', {
+    version: 1, schedule: initialSchedule(Date.now()),
+    clips: Object.fromEntries(legacyClips.map(clip => [clip.id, { clip, owner: null }])),
+    examples: legacyClips.map(clip => clip.id), receipts: {}, limits: {},
+  });
+  const restored = new BuildingShow(ctx, env);
+  const updated = await (await api(restored, 'examples')).json() as { clips: Clip[] };
+  assert.deepEqual(updated.clips.map(clip => clip.title), definitions.map(clip => clip.title));
+  assert.deepEqual(updated.clips.slice(0, -1), legacyClips);
+  assert.ok(updated.clips.at(-1)?.id.startsWith('example_'));
+  const repeated = await (await api(restored, 'examples')).json() as { clips: Clip[] };
+  assert.deepEqual(repeated.clips, updated.clips);
+  const submitted = await api(restored, 'submit', owner, { clipId: legacyClips[0].id, requestId: 'preview-open-before-deploy' });
+  assert.equal(submitted.status, 200);
+  const result = await submitted.json() as any;
+  assert.deepEqual(result.state.queue[0].clip, legacyClips[0]);
 });
 
 test('public reactions do not reorder; only owners cancel; operator auth gates pause', async () => {

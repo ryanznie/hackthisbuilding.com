@@ -9,7 +9,7 @@ export interface Env {
   AI?: AIBinding;
   ADMIN_TOKEN?: string;
 }
-interface StoredClip { clip: Clip; owner: string | null; }
+interface StoredClip { clip: Clip; owner: string | null; catalogId?: string; }
 interface Receipt { id: string; clipId: string; at: number; }
 interface Data {
   version: 1;
@@ -144,6 +144,29 @@ export class BuildingShow {
   private isCuratedExample(id: string, stored: StoredClip): boolean {
     return stored.owner === null && stored.clip.source === 'example' && this.data.examples.includes(id);
   }
+  private reconcileExamples(now: number): Clip[] {
+    return exampleClips().map(example => {
+      const existingId = this.data.examples.find(id => {
+        const stored = this.data.clips[id];
+        return stored && this.isCuratedExample(id, stored)
+          && (!stored.catalogId || stored.catalogId === example.id)
+          && stored.clip.title === example.title
+          && stored.clip.interpretation === example.interpretation
+          && JSON.stringify(stored.clip.scene) === JSON.stringify(example.scene);
+      });
+      if (existingId) {
+        const stored = this.data.clips[existingId];
+        stored.catalogId = example.id;
+        return stored.clip;
+      }
+      const clip: Clip = { ...example, id: `example_${crypto.randomUUID()}`, scene: validateRenderedScene(example.scene), source: 'example', createdAt: now, expiresAt: 0 };
+      this.data.clips[clip.id] = { clip, owner: null, catalogId: example.id };
+      // Retain previous versions for visitors with an already-approved preview.
+      // The response contains the current catalog; this registry records trust.
+      this.data.examples.push(clip.id);
+      return clip;
+    });
+  }
   private prune(now: number): void {
     for (const [id, stored] of Object.entries(this.data.clips)) {
       // Migrate existing server-owned examples without invalidating open-page IDs.
@@ -170,16 +193,7 @@ export class BuildingShow {
       if (request.method === 'GET') {
         if (path === '/api/health') return json({ ok: true, generationAvailable: !!this.env.AI, mode: 'simulator' });
         if (path === '/api/state') return json(await this.state(now => this.publicState(owner, now)));
-        if (path === '/api/examples') return json(await this.state(now => {
-          if (!this.data.examples.length || this.data.examples.some(id => !this.data.clips[id])) {
-            this.data.examples = exampleClips().map(example => {
-              const clip: Clip = { ...example, id: `example_${crypto.randomUUID()}`, scene: validateRenderedScene(example.scene), source: 'example', createdAt: now, expiresAt: 0 };
-              this.data.clips[clip.id] = { clip, owner: null };
-              return clip.id;
-            });
-          }
-          return { clips: this.data.examples.map(id => this.data.clips[id].clip) };
-        }));
+        if (path === '/api/examples') return json(await this.state(now => ({ clips: this.reconcileExamples(now) })));
         throw new ApiFailure(404, 'NOT_FOUND', 'This endpoint does not exist.');
       }
       if (request.method !== 'POST') throw new ApiFailure(405, 'METHOD_NOT_ALLOWED', 'This request method is not supported.');

@@ -1,11 +1,13 @@
 import { COLS, DOMAIN, ROWS, URL_PASS_MS, type Clip, type Frame, type Layer, type Motion, type RGB, type Scene, type Shape } from './contracts';
 
-const SHAPES = new Set<Shape>(['heart', 'star', 'circle', 'ring', 'rectangle', 'line', 'rain', 'sparkles', 'wave', 'rocket', 'smile']);
+const SHAPES = new Set<Shape>(['heart', 'star', 'circle', 'ring', 'rectangle', 'line', 'rain', 'sparkles', 'wave', 'rocket', 'smile', 'socks']);
 const MOTIONS = new Set<Motion>(['still', 'pulse', 'rise', 'fall', 'orbit', 'sway', 'spin']);
 const TAU = Math.PI * 2;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const modulo = (value: number, modulus: number) => ((value % modulus) + modulus) % modulus;
 const hash = (seed: number) => modulo(Math.sin(seed * 127.1 + 311.7) * 43758.5453, 1);
+// A fixed pixel-art pair of stockings, drawn for this tiny building display.
+const SOCKS = ['000000000', '011100000', '011100000', '011101110', '011101110', '011001110', '111001110', '110001110', '000011110', '000011100', '000000000'];
 
 function record(input: unknown, name: string): Record<string, unknown> {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error(`${name} must be an object.`);
@@ -62,6 +64,11 @@ function shapeCoverage(shape: Shape, dx: number, dy: number, size: number, time:
   const radius = size / 2;
   const distance = Math.hypot(dx, dy);
   switch (shape) {
+    case 'socks': {
+      const col = Math.floor(dx * 9 / size + 4.5);
+      const row = Math.floor(dy * 9 / size + 5.5);
+      return SOCKS[row]?.[col] === '1' ? 1 : 0;
+    }
     case 'circle': return edge(distance - radius);
     case 'ring': return edge(Math.abs(distance - radius * 0.82) - Math.max(0.32, size * 0.065));
     case 'rectangle': return edge(Math.max(Math.abs(dx) - radius, Math.abs(dy) - radius * 0.65));
@@ -167,6 +174,7 @@ export function exampleClips(): Clip[] {
     { id: 'example-stars', title: 'Make a little magic', interpretation: 'A golden star turns gently in a constellation of blue lights.', layers: [makeLayer('sparkles', '#368bef', 4, 8, 9, 'still', 0.5), makeLayer('star', '#ffcc52', 4, 8, 8.5, 'spin', 0.35), makeLayer('circle', '#ff8038', 4, 8, 1.5, 'pulse', 0.5)] },
     { id: 'example-rain', title: 'Neon rain', interpretation: 'Soft trails of cyan and violet fall down the windows.', layers: [makeLayer('rain', '#37daca', 4, 8, 8, 'still', 0.8), makeLayer('rain', '#754fee', 4, 8, 7, 'still', 0.45, 2)] },
     { id: 'example-smile', title: 'Hello, Cambridge', interpretation: 'A bright smile sways gently above a purple ripple.', layers: [makeLayer('smile', '#ffd44e', 4, 6, 7.6, 'sway', 0.35), makeLayer('wave', '#9870ff', 4, 13, 9, 'still', 0.8)] },
+    { id: 'example-red-sox', title: 'Red Sox rally', interpretation: 'A pixel-art pair of red socks with white cuffs cheers on Boston beneath twinkling blue lights.', layers: [makeLayer('sparkles', '#174a95', 4, 8, 9, 'still', 0.7), makeLayer('socks', '#f22d46', 4, 8, 9, 'still', 0), makeLayer('line', '#fff3dc', 2, 3, 2.8, 'still', 0), makeLayer('line', '#fff3dc', 6, 5, 2.8, 'still', 0)] },
   ];
   return definitions.map(({ layers, ...definition }) => ({ ...definition, source: 'example', createdAt: 0, expiresAt: 0, scene: validateScene({ version: 1, background: '#02040b', layers }) }));
 }

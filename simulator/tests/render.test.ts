@@ -34,7 +34,7 @@ test('rejects malformed, executable, unbounded, and unsupported scene input', ()
 test('every example is stable, visible, deterministic, and animated', () => {
   const examples = exampleClips();
   assert.ok(examples.length >= 4);
-  for (const id of ['example-heart', 'example-rocket', 'example-waves', 'example-stars']) assert.ok(examples.some(clip => clip.id === id));
+  for (const id of ['example-heart', 'example-rocket', 'example-waves', 'example-stars', 'example-red-sox']) assert.ok(examples.some(clip => clip.id === id));
   assert.deepEqual(examples, exampleClips());
   for (const example of examples) {
     assert.equal(example.source, 'example');
@@ -49,7 +49,7 @@ test('every example is stable, visible, deterministic, and animated', () => {
 });
 
 test('all supported primitive and motion combinations produce safe frames', () => {
-  const shapes = ['heart', 'star', 'circle', 'ring', 'rectangle', 'line', 'rain', 'sparkles', 'wave', 'rocket', 'smile'];
+  const shapes = ['heart', 'star', 'circle', 'ring', 'rectangle', 'line', 'rain', 'sparkles', 'wave', 'rocket', 'smile', 'socks'];
   const motions = ['still', 'pulse', 'rise', 'fall', 'orbit', 'sway', 'spin'];
   for (const shape of shapes) for (const motion of motions) {
     const scene = validateScene({ ...input(), layers: [{ ...baseLayer, shape, motion }] });

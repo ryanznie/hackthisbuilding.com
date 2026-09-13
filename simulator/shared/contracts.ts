@@ -6,7 +6,7 @@ export const URL_PASS_MS = 12000;
 export const DOMAIN = 'hackthisbuilding.com';
 export type RGB = [number, number, number];
 export type Frame = RGB[][];
-export type Shape = 'heart' | 'star' | 'circle' | 'ring' | 'rectangle' | 'line' | 'rain' | 'sparkles' | 'wave' | 'rocket' | 'smile';
+export type Shape = 'heart' | 'star' | 'circle' | 'ring' | 'rectangle' | 'line' | 'rain' | 'sparkles' | 'wave' | 'rocket' | 'smile' | 'socks';
 export type Motion = 'still' | 'pulse' | 'rise' | 'fall' | 'orbit' | 'sway' | 'spin';
 export interface Layer { shape: Shape; color: string; x: number; y: number; size: number; motion: Motion; speed: number; phase: number; }
 export interface Scene { version: 1; background: string; layers: Layer[]; }
