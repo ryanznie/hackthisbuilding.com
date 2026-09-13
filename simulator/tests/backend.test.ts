@@ -303,3 +303,25 @@ test('worker issues secure private cookies and never trusts forwarded visitor he
   assert.equal(forwarded!.headers.has('cf-connecting-ip'), false);
   assert.match(forwarded!.headers.get('x-htb-ip')!, /^[a-f0-9]{64}$/);
 });
+
+test('display feed is private, row-major, and deduplicates static clips', async t => {
+  const now = 1_800_000_000_000;
+  t.mock.method(Date, 'now', () => now);
+  const { ctx, storage, env } = setup({ DISPLAY_RUNNER_TOKEN: 'display-secret' });
+  const staticClip: Clip = { ...clip, scene: { ...scene, layers: [{ ...scene.layers[0], motion: 'still', speed: 0 }] } };
+  const schedule = initialSchedule(now);
+  schedule.current = { id: 'live-static', owner, clip: staticClip, submittedAt: now - 1000, scheduledAt: now - 1000, voters: [] };
+  schedule.phaseStartedAt = now - 1000; schedule.phaseEndsAt = now + 4000;
+  await storage.put('show', { version: 1, schedule, clips: {}, examples: [], receipts: {}, limits: {} });
+  const show = new BuildingShow(ctx, env);
+  assert.equal((await api(show, 'display/frame')).status, 401);
+  const response = await api(show, 'display/frame', owner, undefined, 'display-secret');
+  assert.equal(response.status, 200);
+  const payload = await response.json() as any;
+  assert.equal(payload.displayId, 'clip:live-static');
+  assert.equal(payload.static, true);
+  assert.equal(payload.sequence, 0);
+  assert.equal(payload.frame.length, 17);
+  assert.ok(payload.frame.every((row: unknown[]) => row.length === 9));
+  assert.equal(payload.frame.flat(2).length, 459);
+});
