@@ -20,7 +20,7 @@ export function checkPrompt(input: unknown): string {
   if (/\b(?:ignore|override|disregard)\b.{0,50}\b(?:instructions|rules|system|policy)\b|\b(?:system prompt|jailbreak|api[ _-]?key|access token)\b/iu.test(prompt)) {
     throw failure('ADVERSARIAL_PROMPT', 'This prompt appears to be trying to bypass the display rules. Describe the visual you want without instructions to the AI.');
   }
-  if (/(?:\b(?:pixel|window|row|column|coordinate)s?\b.{0,24}(?:\d|on|off|set|toggle)|\b[xy]\s*[:=]\s*\d|\(\s*\d+\s*,\s*\d+\s*\)|\[\s*\d+\s*,\s*\d+\s*\])/iu.test(prompt)) {
+  if (/(?:\b(?:pixel|window|row|column|coordinate)s?\b.{0,24}(?:\d|\b(?:on|off|set|toggle)\b)|\b[xy]\s*[:=]\s*\d|\(\s*\d+\s*,\s*\d+\s*\)|\[\s*\d+\s*,\s*\d+\s*\])/iu.test(prompt)) {
     throw failure('ADVERSARIAL_PROMPT', 'Direct pixel and coordinate instructions are not allowed. Describe the picture or motion you want instead.');
   }
   if (/(?:https?:\/\/|www\.|<\/?script\b|javascript:|\beval\s*\()/iu.test(prompt)) {

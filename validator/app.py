@@ -111,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, {"valid": True, "animation": Animation.model_validate(data).model_dump()})
             return self.reply(404, {"error": "not_found"})
         except ValidationError as error:
-            self.reply(422, {"error": "schema_invalid", "details": error.errors(include_input=False, include_url=False)})
+            self.reply(422, {"error": "schema_invalid", "details": error.errors(include_input=False, include_url=False, include_context=False)})
         except RuntimeError:
             self.reply(503, {"error": "moderation_failed"})
         except Exception:
