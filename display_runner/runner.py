@@ -62,45 +62,25 @@ class WebDisplay:
             raise ValueError("GREEN_BUILDING_INSTANCE must be the exact server-issued adjective-animal name")
         self.url = f"{base_url.rstrip('/')}/i/{instance}/frame"
         self.context = ssl.create_default_context(cafile=certifi.where())
-        self.condition = threading.Condition()
-        self.pending: bytes | None = None
-        self.running = True
-        self.error: Exception | None = None
-        self.thread = threading.Thread(target=self._sender, name="building-frame-sender", daemon=True)
-        self.thread.start()
+        self.last_send = float('-inf')
 
     def makeframe(self) -> list[list[list[int]]]:
         return [[[0, 0, 0] for _ in range(COLS)] for _ in range(ROWS)]
 
     def send(self, frame: object) -> None:
         payload = encode_frame(frame)
-        with self.condition:
-            if self.error:
-                error, self.error = self.error, None
-                raise RuntimeError("the display sender failed") from error
-            self.pending = payload
-            self.condition.notify()
-
-    def _sender(self) -> None:
-        while self.running:
-            with self.condition:
-                self.condition.wait_for(lambda: self.pending is not None or not self.running)
-                if not self.running:
-                    return
-                payload, self.pending = self.pending, None
-            try:
-                request = urllib.request.Request(self.url, data=payload, headers={"Content-Type": "application/octet-stream", "User-Agent": USER_AGENT}, method="POST")
-                with urllib.request.urlopen(request, timeout=3, context=self.context) as response:
-                    if response.status != 204:
-                        raise RuntimeError(f"unexpected display response {response.status}")
-            except Exception as error:
-                self.error = error
+        delay = self.last_send + 1 / 30 - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+        self.last_send = time.monotonic()
+        request = urllib.request.Request(self.url, data=payload, headers={"Content-Type": "application/octet-stream", "User-Agent": USER_AGENT}, method="POST")
+        # Delivery is acknowledged before run() deduplicates or clears failures.
+        with urllib.request.urlopen(request, timeout=3, context=self.context) as response:
+            if response.status != 204:
+                raise RuntimeError(f"unexpected display response {response.status}")
 
     def close(self) -> None:
-        self.running = False
-        with self.condition:
-            self.condition.notify()
-        self.thread.join(timeout=4)
+        pass
 
 
 class FrameSource:

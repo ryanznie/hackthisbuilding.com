@@ -1,6 +1,7 @@
 import unittest
 import threading
-from runner import COLS, FRAME_BYTES, ROWS, encode_frame, run, validate_frame
+from unittest.mock import patch
+from runner import WebDisplay, COLS, FRAME_BYTES, ROWS, encode_frame, run, validate_frame
 
 
 def frame(): return [[[0, 0, 0] for _ in range(COLS)] for _ in range(ROWS)]
@@ -50,6 +51,36 @@ class FrameTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "five consecutive failures"):
             run(Source(), display, threading.Event())
         self.assertTrue(display.closed)
+
+
+    def test_persistent_target_failures_stop_after_five_acknowledgments(self):
+        stop = threading.Event()
+        class Source:
+            calls = 0
+            def next(self):
+                self.calls += 1
+                if self.calls > 10: stop.set()
+                return {"frame": frame(), "displayId": "clip:dynamic", "sequence": self.calls, "static": False}
+        with patch("runner.urllib.request.urlopen", side_effect=OSError("target offline")) as post:
+            with self.assertRaisesRegex(RuntimeError, "five consecutive failures"):
+                run(Source(), WebDisplay("test-instance"), stop)
+            self.assertEqual(post.call_count, 5)
+
+    def test_failed_static_post_is_retried_then_deduplicated(self):
+        stop = threading.Event()
+        class Source:
+            calls = 0
+            def next(self):
+                self.calls += 1
+                if self.calls == 4: stop.set()
+                return {"frame": frame(), "displayId": "clip:static", "sequence": 0, "static": True}
+        class Response:
+            status = 204
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+        with patch("runner.urllib.request.urlopen", side_effect=[OSError("transient"), Response()]) as post:
+            run(Source(), WebDisplay("test-instance"), stop)
+            self.assertEqual(post.call_count, 2)
 
 
 if __name__ == "__main__": unittest.main()

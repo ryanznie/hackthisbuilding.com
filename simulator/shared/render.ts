@@ -228,6 +228,10 @@ const DOMAIN_COLUMNS: number[][] = Array.from(DOMAIN).flatMap(letter => {
   const glyph = FONT[letter];
   return [...Array.from({ length: glyph[0].length }, (_, col) => glyph.map(row => Number(row[col]))), [0, 0, 0, 0, 0]];
 }).slice(0, -1);
+const DOMAIN_COLUMN_COLORS: RGB[] = Array.from(DOMAIN).flatMap((letter, index) => {
+  const color: RGB = index < 4 ? [250, 202, 76] : index < 8 ? [105, 193, 250] : index < 16 ? [247, 121, 166] : [245, 243, 230];
+  return Array.from({ length: FONT[letter][0].length + 1 }, () => color);
+}).slice(0, -1);
 
 /** One entire domain pass every 12 seconds; caller schedules two passes. */
 export function urlFrame(elapsedMs: number): Frame {
@@ -237,7 +241,7 @@ export function urlFrame(elapsedMs: number): Frame {
   const firstColumn = Math.floor(position) - COLS;
   for (let col = 0; col < COLS; col++) {
     const glyph = DOMAIN_COLUMNS[firstColumn + col];
-    if (glyph) for (let row = 0; row < 5; row++) if (glyph[row]) frame[row + 6][col] = [156, 238, 91];
+    if (glyph) for (let row = 0; row < 5; row++) if (glyph[row]) frame[row + 6][col] = [...DOMAIN_COLUMN_COLORS[firstColumn + col]];
     // Quiet architectural rails keep the facade alive between letters.
     const glow = Math.round(13 + 8 * (1 + Math.sin(col * 0.65 + time / 1700)) / 2);
     frame[3][col] = [4, glow, 14];

@@ -207,7 +207,7 @@ export class BuildingShow {
             const playing = !!current && current.scheduledAt <= now && now < current.scheduledAt + CLIP_MS;
             const elapsedMs = playing ? now - current.scheduledAt : now - this.data.schedule.phaseStartedAt;
             const scene = playing ? current.clip.scene : null;
-            const isStatic = !!scene && scene.layers.every(layer => layer.motion === 'still') && (!scene.raster || scene.raster.motion === 'still');
+            const isStatic = !!scene && scene.layers.every(layer => layer.motion === 'still' && !['rain', 'wave', 'sparkles', 'rocket'].includes(layer.shape)) && (!scene.raster || scene.raster.motion === 'still');
             return {
               frame: scene ? renderScene(scene, elapsedMs) : urlFrame(elapsedMs),
               sequence: isStatic ? 0 : Math.floor(elapsedMs * FPS / 1000),
