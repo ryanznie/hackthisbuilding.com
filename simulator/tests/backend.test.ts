@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CLIP_MS, URL_PASS_MS, type Clip, type Scene } from '../shared/contracts';
-import { exampleClips } from '../shared/render';
+import { exampleClips, renderScene } from '../shared/render';
 import { initialSchedule, nextInvitationSlot, advance, reschedule, isReserved, removeWaiting, showState, stopCurrent, type Entry } from '../worker/schedule';
 import worker, { BuildingShow, boundReceipts, checkOrigin, consumeGenerationLimits, consumeMutationLimits, readBody, type Env } from '../worker/index';
 import { ApiFailure, checkPrompt, generateAnimation, MODEL, moderate, parseModelJson, PREVIEW_TTL_MS, type AIBinding } from '../worker/generation';
@@ -306,4 +306,49 @@ test('worker issues secure private cookies and never trusts forwarded visitor he
   assert.match(forwarded!.headers.get('x-htb-visitor')!, /^[a-f0-9]{64}$/);
   assert.equal(forwarded!.headers.has('cf-connecting-ip'), false);
   assert.match(forwarded!.headers.get('x-htb-ip')!, /^[a-f0-9]{64}$/);
+});
+
+test('display feed is private, row-major, and deduplicates static clips', async t => {
+  const now = 1_800_000_000_000;
+  t.mock.method(Date, 'now', () => now);
+  const { ctx, storage, env } = setup({ DISPLAY_RUNNER_TOKEN: 'display-secret' });
+  const staticClip: Clip = { ...clip, scene: { ...scene, layers: [{ ...scene.layers[0], motion: 'still', speed: 0 }] } };
+  const schedule = initialSchedule(now);
+  schedule.current = { id: 'live-static', owner, clip: staticClip, submittedAt: now - 1000, scheduledAt: now - 1000, voters: [] };
+  schedule.phaseStartedAt = now - 1000; schedule.phaseEndsAt = now + 4000;
+  await storage.put('show', { version: 1, schedule, clips: {}, examples: [], receipts: {}, limits: {} });
+  const show = new BuildingShow(ctx, env);
+  assert.equal((await api(show, 'display/frame')).status, 401);
+  const response = await api(show, 'display/frame', owner, undefined, 'display-secret');
+  assert.equal(response.status, 200);
+  const payload = await response.json() as any;
+  assert.equal(payload.displayId, 'clip:live-static');
+  assert.equal(payload.static, true);
+  assert.equal(payload.sequence, 0);
+  assert.equal(payload.frame.length, 17);
+  assert.ok(payload.frame.every((row: unknown[]) => row.length === 9));
+  assert.equal(payload.frame.flat(2).length, 459);
+});
+
+
+test('display feed preserves intrinsic motion for still rain waves sparkles and rocket flames', async t => {
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, 'now', () => now);
+  for (const shape of ['rain', 'wave', 'sparkles', 'rocket'] as const) {
+    const { ctx, storage, env } = setup({ DISPLAY_RUNNER_TOKEN: 'display-secret' });
+    const animation: Clip = { ...clip, scene: { ...scene, layers: [{ ...scene.layers[0], shape, motion: 'still', size: 8 }] } };
+    const schedule = initialSchedule(now);
+    const start = now;
+    schedule.current = { id: `intrinsic-${shape}`, owner, clip: animation, submittedAt: now, scheduledAt: now, voters: [] };
+    schedule.phaseStartedAt = now; schedule.phaseEndsAt = now + 5000;
+    await storage.put('show', { version: 1, schedule, clips: {}, examples: [], receipts: {}, limits: {} });
+    const show = new BuildingShow(ctx, env);
+    const first = await (await api(show, 'display/frame', owner, undefined, 'display-secret')).json() as any;
+    now += 1875;
+    const next = await (await api(show, 'display/frame', owner, undefined, 'display-secret')).json() as any;
+    assert.equal(first.static, false, shape);
+    assert.ok(next.sequence > first.sequence, shape);
+    assert.deepEqual(next.frame, renderScene(animation.scene, now - start));
+    assert.notDeepEqual(first.frame, next.frame, shape);
+  }
 });

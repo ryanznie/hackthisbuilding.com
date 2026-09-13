@@ -65,10 +65,15 @@ test('URL repeats after each full pass and includes both ends of the domain', ()
   const letters = (time: number) => urlFrame(time).slice(6, 11);
   assert.deepEqual(letters(2200), letters(2200 + URL_PASS_MS));
   assert.notDeepEqual(letters(2200), letters(5200));
-  const isInk = (pixel: number[]) => pixel[0] === 156;
+  const isInk = (pixel: number[]) => pixel[0] > 100;
   assert.ok(letters(650).flat().some(isInk), 'beginning of domain enters the display');
   assert.ok(letters(11400).flat().some(isInk), 'end of domain reaches the display');
   assert.ok(!letters(0).flat().some(isInk), 'pass starts with a clear left-to-right entry');
+  for (const [time, color] of [[1800, [250, 202, 76]], [4000, [105, 193, 250]], [7000, [247, 121, 166]], [11400, [245, 243, 230]]] as const) {
+    const ink = letters(time).flat().filter(isInk);
+    assert.ok(ink.length > 0);
+    assert.ok(ink.every(pixel => pixel.every((channel, index) => channel === color[index])), 'hack / this / building / .com retain their respective colors while scrolling');
+  }
 });
 
 const rasterPixels = (): Frame => Array.from({ length: ROWS }, (_, row) => Array.from({ length: COLS }, (_, col) => [row * 13, col * 27, 255 - row * 9]));
