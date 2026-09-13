@@ -83,4 +83,20 @@ class FrameTests(unittest.TestCase):
             self.assertEqual(post.call_count, 2)
 
 
+    def test_static_keepalive_prevents_organizer_clip_takeover(self):
+        stop = threading.Event()
+        clock = [0.0]
+        class Source:
+            calls = 0
+            def next(self):
+                self.calls += 1
+                if self.calls == 4: stop.set()
+                return {"frame": frame(), "displayId": "clip:static", "sequence": 0, "static": True}
+        def tick(_): clock[0] += 0.6
+        display = FakeDisplay()
+        with patch("runner.time.monotonic", side_effect=lambda: clock[0]), patch.object(stop, "wait", side_effect=tick):
+            run(Source(), display, stop)
+        self.assertEqual(len(display.sent), 2)
+
+
 if __name__ == "__main__": unittest.main()

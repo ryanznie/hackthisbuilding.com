@@ -104,15 +104,17 @@ class FrameSource:
 def run(source: FrameSource, display: Display, stop: threading.Event) -> None:
     last_key: tuple[str, int] | None = None
     failures = 0
+    last_sent = float('-inf')
     try:
         while not stop.is_set():
             started = time.monotonic()
             try:
                 payload = source.next()
                 key = (str(payload["displayId"]), int(payload["sequence"]))
-                if key != last_key:
+                if key != last_key or time.monotonic() - last_sent >= 1:
                     display.send(payload["frame"])
                     last_key = key
+                    last_sent = time.monotonic()
                 failures = 0
             except Exception as error:
                 failures += 1
