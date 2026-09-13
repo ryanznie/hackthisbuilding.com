@@ -88,7 +88,7 @@ export async function requestOpenRouter(
 /** The existing moderation/generation pipeline consumes the returned JSON. */
 export function createOpenRouterAI(
   apiKey: string,
-  model = 'google/gemini-2.5-flash',
+  model = 'openai/gpt-4.1-mini',
   options: Pick<OpenRouterRequestOptions, 'fetcher'> = {},
 ): AIBinding {
   return {

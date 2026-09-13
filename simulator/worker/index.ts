@@ -2,7 +2,7 @@ import type { Clip } from '../shared/contracts';
 import { exampleClips } from '../shared/render';
 import { ApiFailure, checkPrompt, generateAnimation, PREVIEW_TTL_MS, validateRenderedScene, type AIBinding } from './generation';
 import { createOpenRouterAI } from './openrouter';
-import { generateImageAnimation, wantsImage } from './images';
+import { createValidationService } from './validator';
 import { advance, initialSchedule, isReserved, QUEUE_LIMIT, removeWaiting, reschedule, showState, stopCurrent, type Schedule } from './schedule';
 
 export interface Env {
@@ -10,6 +10,8 @@ export interface Env {
   ASSETS: Fetcher;
   AI?: AIBinding;
   OPENROUTER_API_KEY?: string;
+  VALIDATOR_URL?: string;
+  VALIDATOR_TOKEN?: string;
   ADMIN_TOKEN?: string;
 }
 interface StoredClip { clip: Clip; owner: string | null; catalogId?: string; }
@@ -194,7 +196,7 @@ export class BuildingShow {
       const ipHash = request.headers.get('x-htb-ip') ?? '';
       if (!/^[a-f0-9]{64}$/.test(owner) || !/^[a-f0-9]{64}$/.test(ipHash)) throw new ApiFailure(403, 'INVALID_SESSION', 'Reload the website to start a session.');
       if (request.method === 'GET') {
-        if (path === '/api/health') return json({ ok: true, generationAvailable: !!(this.env.OPENROUTER_API_KEY || this.env.AI), imageGenerationAvailable: !!this.env.OPENROUTER_API_KEY, generationProvider: this.env.OPENROUTER_API_KEY ? 'openrouter' : 'workers-ai', mode: 'simulator' });
+        if (path === '/api/health') return json({ ok: true, generationAvailable: !!(this.env.OPENROUTER_API_KEY || this.env.AI), imageGenerationAvailable: false, generationProvider: this.env.OPENROUTER_API_KEY ? 'openrouter-text' : 'workers-ai', mode: 'simulator' });
         if (path === '/api/state') return json(await this.state(now => this.publicState(owner, now)));
         if (path === '/api/examples') return json(await this.state(now => ({ clips: this.reconcileExamples(now) })));
         throw new ApiFailure(404, 'NOT_FOUND', 'This endpoint does not exist.');
@@ -211,9 +213,8 @@ export class BuildingShow {
           consumeGenerationLimits(this.data.limits, owner, ipHash, now);
         });
         // Network inference does not hold the scheduler lock or delay other visitors.
-        const generated = this.env.OPENROUTER_API_KEY && wantsImage(prompt)
-          ? await generateImageAnimation(ai, this.env.OPENROUTER_API_KEY, prompt, this.env.ASSETS)
-          : await generateAnimation(ai, prompt);
+        const validator = this.env.VALIDATOR_URL ? createValidationService(this.env.VALIDATOR_URL, this.env.VALIDATOR_TOKEN) : undefined;
+        const generated = await generateAnimation(ai, prompt, validator);
         return json(await this.state(now => {
           if (Object.keys(this.data.clips).length >= 250) throw new ApiFailure(503, 'PREVIEW_CAPACITY', 'The preview gallery is busy. Please try again shortly.');
           const clip: Clip = { ...generated, id: crypto.randomUUID(), source: 'ai', createdAt: now, expiresAt: now + PREVIEW_TTL_MS };
