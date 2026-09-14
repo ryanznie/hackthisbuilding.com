@@ -4,7 +4,7 @@
 
 Create light art, show a Red Sox score or Cambridge weather snapshot, or play Pong and Super Mario on a 17×9 window grid. Preview your lights, join one shared queue, and get a 30-second turn. The building is rendered in an interactive browser simulator.
 
-The app is in [`simulator/`](simulator), built with React, Three.js, OpenRouter, and a Cloudflare Durable Object queue. The team's separate proof of concept is preserved at the repository root. The current source also includes an authenticated [organizer simulator bridge](display_runner/README.md). Its private instance has not been established or tested against the organizer's service. See [development and deployment](docs/DEPLOYMENT.md) for setup, operator controls, and recovery.
+The app is in [`simulator/`](simulator), built with React, Three.js, OpenRouter, and a Cloudflare Durable Object queue. The team's separate proof of concept is preserved at the repository root. The current source also includes an authenticated [organizer simulator bridge](display_runner/README.md). The assigned organizer instance is connected through a supervised local runner; live colored frames were verified over the organizer's WebSocket on September 13, 2026. See [development and deployment](docs/DEPLOYMENT.md) for setup, operator controls, and recovery.
 
 The score, weather, Mario, four-color domain treatment, and bridge changes are locally implemented; their publication is pending. The public link above is the existing deployment, not evidence that every source change is live. [Acceptance results](docs/acceptance-results.md) distinguish local tests from recorded deployments.
 

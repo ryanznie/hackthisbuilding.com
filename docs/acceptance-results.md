@@ -2,7 +2,7 @@
 
 Public URL: https://www.hackthisbuilding.com
 
-This file retains historical deployment evidence below. The latest local feature checks are in the final section; they do not establish publication or connection to an organizer instance.
+This file retains historical deployment evidence below. Earlier sections retain the status at each historical check. The final sections record publication and the subsequent actual organizer connection.
 
 | Check | Observed result |
 |---|---|
@@ -94,3 +94,13 @@ Release commit `bdad26a77c988caa1679c39df0012191561862c3` includes both merged R
 - The external Sundai instance and physical installation remain unconnected. No `DISPLAY_RUNNER_TOKEN` or private Python `VALIDATOR_URL` is configured in the public Worker; built-in moderation remains active. The runner and optional validator are included and tested, with setup documented separately.
 
 Final public browser check: the immutable Pages release loaded Interactive 3D, all three activity buttons, separate score/weather/rain buttons, and the scrolling colored address on the actual facade. A real Pong admission started at `1789344322641` and ended at `1789344352641`, exactly 30,000 ms; the public shared API returned its authoritative ball, paddle, and score state.
+
+## Actual organizer connection — September 13, 2026, 8:21 PM EDT
+
+The user supplied their assigned simulator instance. Its endpoint and the shared Worker credential are configured only in the ignored private runner environment; the public Worker now has DISPLAY_RUNNER_TOKEN. A macOS LaunchAgent supervises the runner and prevents idle sleep while running. The host must remain powered and online; reconnecting after a real failure still requires an operator resume. The existing 600-frame, 15-FPS organizer clip was preserved.
+
+Initial testing exposed occasional TLS handshakes beyond the original 0.5-second socket budget. The corrected transport uses two-second socket timeouts and persistent HTTP/1.1 connections, one for the source and one for the target. Bodies are bounded and consumed before reuse; failed connections reset without silently retrying POSTs. Freshness validation, rate limiting, heartbeat expiry and deliberate recovery remain in place. All **16 runner regressions passed**.
+
+An independent read-only WebSocket subscription received **127 nonblack live 459-byte frames in 15.019 seconds**, 114 distinct frames, approximately 8.5 FPS. All four exact domain colors were present. The target reported 803 accepted frames; the final public state reported **configured=true, connected=true, paused=false** with a fresh heartbeat. This proves live organizer-simulator frame transport, not physical MIT-building output.
+
+A second subscription was started before queue admission. It captured **36 actual Mario frames**, each containing the exact sky, red-cap and blue-overalls palette. The source reported the matching `mario` turn with `durationMs:30000`, `connected:true` and `paused:false`. This confirms game frames reach the organizer; player movement was not captured in that observation window.

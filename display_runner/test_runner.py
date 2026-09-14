@@ -3,11 +3,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from runner import (
     COLS, FPS, FRAME_BYTES, MAX_FRAME_AGE_MS, MAX_FUTURE_SKEW_MS,
-    REQUEST_TIMEOUT, ROWS, FrameSource, InstanceLock, WebDisplay,
+    REQUEST_TIMEOUT, ROWS, FrameSource, InstanceLock, PersistentHTTP, WebDisplay,
     blank_frame, encode_frame, run, validate_frame, validate_payload,
 )
 
@@ -57,6 +57,9 @@ class Source:
     def report_status(self, connected, error=None):
         self.statuses.append((connected, error))
 
+    def close(self):
+        pass
+
 
 class Display:
     def __init__(self, fail_clips=0):
@@ -80,17 +83,40 @@ class Display:
 
 
 class Response:
-    def __init__(self, status=204, data=b""):
+    def __init__(self, status=204, data=b"", headers=None, will_close=False):
         self.status, self.data = status, data
+        self.headers = {"Content-Length": str(len(data))} if headers is None else headers
+        self.will_close = will_close
+        self.consumed = False
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        return False
+    def getheader(self, name):
+        return self.headers.get(name)
 
     def read(self, maximum):
+        self.consumed = len(self.data) <= maximum
         return self.data[:maximum]
+
+
+class Connection:
+    def __init__(self, respond):
+        self.respond = respond
+        self.requests = []
+        self.response = None
+        self.closed = False
+
+    def request(self, method, path, body=None, headers=None):
+        if self.closed:
+            raise AssertionError("closed connections must not be reused")
+        if self.response is not None and not self.response.consumed:
+            raise AssertionError("response body must be consumed before connection reuse")
+        self.requests.append((method, path, body, headers))
+
+    def getresponse(self):
+        self.response = self.respond(*self.requests[-1])
+        return self.response
+
+    def close(self):
+        self.closed = True
 
 
 class RunnerTests(unittest.TestCase):
@@ -204,16 +230,16 @@ class RunnerTests(unittest.TestCase):
         display = WebDisplay("test-target")
         clip_attempts = 0
         successful_posts = 0
-        def target(request, **kwargs):
+        def target(method, path, body, headers):
             nonlocal clip_attempts, successful_posts
-            if request.data == encode_frame(colored_frame()):
+            if body == encode_frame(colored_frame()):
                 clip_attempts += 1
                 if clip_attempts == 1:
                     successful_posts += 1
                     return Response(204)
             raise OSError("target died after the first acknowledgment")
         stop = Stop(200, self.clock)
-        with patch("runner.urllib.request.urlopen", side_effect=target):
+        with patch("runner.http.client.HTTPSConnection", side_effect=lambda *args, **kwargs: Connection(target)):
             with self.assertRaisesRegex(RuntimeError, "five consecutive failures"):
                 run(source, display, stop)
         self.assertGreater(stop.remaining, 0, "target failure must stop the runner before the test's stop deadline")
@@ -239,36 +265,84 @@ class RunnerTests(unittest.TestCase):
     def test_web_display_requires_ack_and_rates_all_posts_including_retries(self):
         display = WebDisplay("test-target")
         times = []
-        def send(request, **kwargs):
+        def send(method, path, body, headers):
             times.append(self.clock.now())
-            self.assertEqual(request.data, bytes([20, 40, 60]) * ROWS * COLS)
-            self.assertEqual(request.get_method(), "POST")
-            self.assertEqual(kwargs["timeout"], REQUEST_TIMEOUT)
+            self.assertEqual(body, bytes([20, 40, 60]) * ROWS * COLS)
+            self.assertEqual(method, "POST")
             return Response(status=500 if len(times) == 1 else 204)
-        with patch("runner.urllib.request.urlopen", side_effect=send):
+        with patch("runner.http.client.HTTPSConnection", side_effect=lambda *args, **kwargs: Connection(send)) as connect:
             with self.assertRaises(RuntimeError):
                 display.send(colored_frame())
             display.send(colored_frame())
             display.send(colored_frame())
+            self.assertEqual(connect.call_count, 2, "only the failed response should require a new connection")
+            self.assertTrue(all(call.kwargs["timeout"] == REQUEST_TIMEOUT for call in connect.call_args_list))
         self.assertTrue(all(later - earlier >= 1 / FPS - 1e-10 for earlier, later in zip(times, times[1:])))
 
     def test_frame_source_authenticates_feed_and_status_requests(self):
         source = FrameSource("https://source.test", "private-token")
-        requests = []
-        def request(req, **kwargs):
-            requests.append(req)
-            self.assertEqual(req.get_header("Authorization"), "Bearer private-token")
-            self.assertEqual(kwargs["timeout"], REQUEST_TIMEOUT)
-            return Response(200, json.dumps(payload()).encode()) if req.get_method() == "GET" else Response()
-        with patch("runner.urllib.request.urlopen", side_effect=request):
+        def request(method, path, body, headers):
+            self.assertEqual(headers["Authorization"], "Bearer private-token")
+            return Response(200, json.dumps(payload()).encode()) if method == "GET" else Response(200, b'{"ok":true}')
+        connection = Connection(request)
+        with patch("runner.http.client.HTTPSConnection", return_value=connection) as connect:
             self.assertEqual(source.next(), payload())
             source.report_status(False, "source_unavailable")
-        self.assertEqual(requests[0].full_url, "https://source.test/api/display/frame")
-        self.assertEqual(requests[1].full_url, "https://source.test/api/display/status")
-        self.assertEqual(json.loads(requests[1].data), {"connected": False, "error": "source_unavailable"})
-        with patch("runner.urllib.request.urlopen", return_value=Response(200, b"x" * 20000)):
+            self.assertEqual(source.next(), payload(), "status response bodies must be drained before the next GET")
+            self.assertEqual(connect.call_count, 1, "GET frames and status POSTs share the source connection")
+            self.assertEqual(connect.call_args.kwargs["timeout"], REQUEST_TIMEOUT)
+        self.assertEqual(connection.requests[0][1], "/api/display/frame")
+        self.assertEqual(connection.requests[1][1], "/api/display/status")
+        self.assertEqual(json.loads(connection.requests[1][2]), {"connected": False, "error": "source_unavailable"})
+        source.close()
+        oversized = Connection(lambda *args: Response(200, b"x" * 20000))
+        with patch("runner.http.client.HTTPSConnection", return_value=oversized):
             with self.assertRaisesRegex(ValueError, "too large"):
                 source.next()
+        self.assertTrue(oversized.closed)
+
+    def test_transport_reconnects_after_error_without_retrying_an_uncertain_post(self):
+        broken = Connection(Mock(side_effect=OSError("response lost after request was sent")))
+        healthy = Connection(lambda *args: Response(204))
+        display = WebDisplay("test-target")
+        with patch("runner.http.client.HTTPSConnection", side_effect=[broken, healthy]) as connect:
+            with self.assertRaises(OSError):
+                display.send(colored_frame())
+            self.assertEqual(connect.call_count, 1)
+            self.assertEqual(len(broken.requests), 1, "transport must not silently resend a POST")
+            self.assertTrue(broken.closed)
+            display.send(colored_frame())
+            display.send(colored_frame())
+            self.assertEqual(connect.call_count, 2)
+            self.assertEqual(len(healthy.requests), 2, "healthy target posts reuse one connection")
+        display.close()
+        self.assertTrue(healthy.closed)
+
+    def test_chunked_body_bound_and_server_close_both_discard_connection(self):
+        too_large = Connection(lambda *args: Response(200, b"x" * 20000, headers={}))
+        server_close = Connection(lambda *args: Response(200, b"ok", will_close=True))
+        healthy = Connection(lambda *args: Response(200, b"ok"))
+        client = PersistentHTTP("http://localhost:8787", None)
+        with patch("runner.http.client.HTTPConnection", side_effect=[too_large, server_close, healthy]) as connect:
+            with self.assertRaisesRegex(ValueError, "too large"):
+                client.request("GET", "http://localhost:8787/frame", maximum=16384)
+            self.assertTrue(too_large.closed)
+            self.assertEqual(client.request("GET", "http://localhost:8787/frame"), b"ok")
+            self.assertTrue(server_close.closed)
+            self.assertEqual(client.request("GET", "http://localhost:8787/frame"), b"ok")
+            self.assertEqual(connect.call_count, 3)
+            self.assertEqual(connect.call_args.args, ("localhost", 8787))
+        client.close()
+
+    def test_persistent_transport_rejects_redirect_without_sending_credentials_elsewhere(self):
+        redirected = Connection(lambda *args: Response(302, b"", headers={"Location": "https://elsewhere.test/"}))
+        source = FrameSource("https://source.test", "private-token")
+        with patch("runner.http.client.HTTPSConnection", return_value=redirected) as connect:
+            with self.assertRaisesRegex(RuntimeError, "302"):
+                source.next()
+            self.assertEqual(connect.call_count, 1)
+            self.assertEqual(len(redirected.requests), 1)
+            self.assertTrue(redirected.closed)
 
     def test_instance_lock_excludes_duplicate_but_releases_on_exit(self):
         with tempfile.TemporaryDirectory() as directory:

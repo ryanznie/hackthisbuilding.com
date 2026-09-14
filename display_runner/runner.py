@@ -3,25 +3,27 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import http.client
 import json
 import math
 import os
 import re
 import signal
 import ssl
+import sys
 import tempfile
 import threading
 import time
-import urllib.request
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlsplit
 
 import certifi
 
 ROWS, COLS, CHANNELS = 17, 9, 3
 FRAME_BYTES = ROWS * COLS * CHANNELS
 FPS = 30
-REQUEST_TIMEOUT = 0.5
+REQUEST_TIMEOUT = 2.0
 MAX_FRAME_AGE_MS = 750
 MAX_FUTURE_SKEW_MS = 250
 MAX_FAILURES = 5
@@ -106,6 +108,57 @@ class Display(Protocol):
     def close(self) -> None: ...
 
 
+class PersistentHTTP:
+    """One bounded HTTP/1.1 connection per origin, with no hidden POST retries."""
+    def __init__(self, url: str, context: ssl.SSLContext) -> None:
+        parsed = urlsplit(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("display connection requires an HTTP(S) origin")
+        self.origin = (parsed.scheme, parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+        self.context = context
+        self.connection: http.client.HTTPConnection | None = None
+
+    def close(self) -> None:
+        if self.connection is not None:
+            self.connection.close()
+            self.connection = None
+
+    def request(self, method: str, url: str, *, body: bytes | None = None, headers: dict[str, str] | None = None, statuses: tuple[int, ...] = (200,), maximum: int = 4096) -> bytes:
+        parsed = urlsplit(url)
+        origin = (parsed.scheme, parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+        if origin != self.origin:
+            raise ValueError("a persistent display connection cannot change origins")
+        try:
+            if self.connection is None:
+                scheme, host, port = self.origin
+                if scheme == "https":
+                    self.connection = http.client.HTTPSConnection(host, port, timeout=REQUEST_TIMEOUT, context=self.context)
+                else:
+                    self.connection = http.client.HTTPConnection(host, port, timeout=REQUEST_TIMEOUT)
+            path = parsed.path or "/"
+            if parsed.query:
+                path += "?" + parsed.query
+            self.connection.request(method, path, body=body, headers={"User-Agent": USER_AGENT, **(headers or {})})
+            response = self.connection.getresponse()
+            declared = response.getheader("Content-Length")
+            if declared is not None and int(declared) > maximum:
+                raise ValueError("display HTTP response is too large")
+            # Consume even status POST bodies before reusing this connection.
+            content = response.read(maximum + 1)
+            if len(content) > maximum:
+                raise ValueError("display HTTP response is too large")
+            if response.status not in statuses:
+                raise RuntimeError(f"unexpected display HTTP response {response.status}")
+            if response.will_close:
+                self.close()
+            return content
+        except Exception:
+            self.close()
+            # The outer runner decides whether to retry; uncertain POST delivery
+            # is never retried within this transport layer.
+            raise
+
+
 class WebDisplay:
     """A send succeeds only after the target acknowledges the exact RGB bytes."""
     def __init__(self, instance: str, base_url: str = "https://sundai.willsarg.com/api") -> None:
@@ -115,24 +168,23 @@ class WebDisplay:
             raise ValueError("GREEN_BUILDING_API must be an HTTP(S) URL")
         self.url = f"{base_url.rstrip('/')}/i/{instance}/frame"
         self.context = ssl.create_default_context(cafile=certifi.where())
+        self.http = PersistentHTTP(self.url, self.context)
         self.last_send = -math.inf
 
     def makeframe(self) -> list[list[list[int]]]:
         return blank_frame()
 
     def send(self, frame: object) -> None:
-        request = urllib.request.Request(self.url, data=encode_frame(frame), headers={"Content-Type": "application/octet-stream", "User-Agent": USER_AGENT}, method="POST")
+        payload = encode_frame(frame)
         # Include fallback/retry frames in the target's rate limit as well.
         delay = self.last_send + 1 / FPS - time.monotonic()
         if delay > 0:
             time.sleep(delay)
         self.last_send = time.monotonic()
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT, context=self.context) as response:
-            if response.status != 204:
-                raise RuntimeError(f"unexpected display response {response.status}")
+        self.http.request("POST", self.url, body=payload, headers={"Content-Type": "application/octet-stream"}, statuses=(204,))
 
     def close(self) -> None:
-        pass
+        self.http.close()
 
 
 class FrameSource:
@@ -143,24 +195,20 @@ class FrameSource:
         self.status_url = f"{url.rstrip('/')}/api/display/status"
         self.token = token
         self.context = ssl.create_default_context(cafile=certifi.where())
+        self.http = PersistentHTTP(self.url, self.context)
 
     def next(self) -> dict:
-        request = urllib.request.Request(self.url, headers={"Authorization": f"Bearer {self.token}", "User-Agent": USER_AGENT})
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT, context=self.context) as response:
-            # A normal 459-channel frame is only a few KB. Bound untrusted JSON.
-            content = response.read(16385)
-        if len(content) > 16384:
-            raise ValueError("display feed response is too large")
+        content = self.http.request("GET", self.url, headers={"Authorization": f"Bearer {self.token}"}, maximum=16384)
         return validate_payload(json.loads(content))
 
     def report_status(self, connected: bool, error: str | None = None) -> None:
         body = {"connected": connected}
         if error:
             body["error"] = error
-        request = urllib.request.Request(self.status_url, data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json", "User-Agent": USER_AGENT}, method="POST")
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT, context=self.context) as response:
-            if response.status not in (200, 204):
-                raise RuntimeError(f"unexpected display status response {response.status}")
+        self.http.request("POST", self.status_url, body=json.dumps(body).encode(), headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}, statuses=(200, 204))
+
+    def close(self) -> None:
+        self.http.close()
 
 
 def run(source: FrameSource, display: Display, stop: threading.Event) -> None:
@@ -204,6 +252,7 @@ def run(source: FrameSource, display: Display, stop: threading.Event) -> None:
                 failures = 0
             except Exception as error:
                 failures += 1
+                print(f"display retry {failures}/{MAX_FAILURES}: {stage} ({type(error).__name__})", file=sys.stderr, flush=True)
                 last_key = None  # Source recovery must restore even a static clip.
                 last_status = -math.inf
                 fallback()
@@ -216,6 +265,7 @@ def run(source: FrameSource, display: Display, stop: threading.Event) -> None:
         fallback()
         disconnected("runner_stopped")
         display.close()
+        source.close()
 
 
 def main() -> None:
