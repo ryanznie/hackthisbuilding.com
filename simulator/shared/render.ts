@@ -353,7 +353,7 @@ const DOMAIN_COLUMN_COLORS: RGB[] = Array.from(DOMAIN).flatMap((letter, index) =
   return Array.from({ length: FONT[letter][0].length + 1 }, () => color);
 }).slice(0, -1);
 
-/** One entire domain pass every 12 seconds; caller schedules two passes. */
+/** One entire domain pass every 12 seconds; the idle screensaver repeats continuously. */
 export function urlFrame(elapsedMs: number): Frame {
   const time = Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0;
   const frame = blank([2, 4, 10]);

@@ -6,6 +6,7 @@ import { advancePong, createPong } from '../shared/pong';
 import { advanceMario, applyMarioInput, createMario, renderMario, type MarioState } from '../shared/mario';
 import { ApiFailure, checkPrompt, generateAnimation, PREVIEW_TTL_MS, validateRenderedScene, type AIBinding } from './generation';
 import { createOpenRouterAI } from './openrouter';
+import { createValidationService } from './validator';
 import { generateImageAnimation, wantsImage } from './images';
 import { RedSoxScoreService, SCORE_PREVIEW_TTL_MS, scoreDescription } from './scores';
 import { WeatherService, WEATHER_PREVIEW_TTL_MS, weatherDescription } from './weather';
@@ -16,6 +17,8 @@ export interface Env {
   ASSETS: Fetcher;
   AI?: AIBinding;
   OPENROUTER_API_KEY?: string;
+  VALIDATOR_URL?: string;
+  VALIDATOR_TOKEN?: string;
   ADMIN_TOKEN?: string;
   DISPLAY_RUNNER_TOKEN?: string;
 }
@@ -349,10 +352,11 @@ export class BuildingShow {
           if (Object.keys(this.data.clips).length >= 250) throw new ApiFailure(503, 'PREVIEW_CAPACITY', 'The preview gallery is busy. Please try again shortly.');
           consumeGenerationLimits(this.data.limits, owner, ipHash, now);
         });
+        const validator = this.env.VALIDATOR_URL ? createValidationService(this.env.VALIDATOR_URL, this.env.VALIDATOR_TOKEN) : undefined;
         // Network inference does not hold the scheduler lock or delay other visitors.
         const generated = this.env.OPENROUTER_API_KEY && wantsImage(prompt)
-          ? await generateImageAnimation(ai, this.env.OPENROUTER_API_KEY, prompt, this.env.ASSETS)
-          : await generateAnimation(ai, prompt);
+          ? await generateImageAnimation(ai, this.env.OPENROUTER_API_KEY, prompt, this.env.ASSETS, { validator })
+          : await generateAnimation(ai, prompt, { validator });
         return json(await this.state(now => {
           if (Object.keys(this.data.clips).length >= 250) throw new ApiFailure(503, 'PREVIEW_CAPACITY', 'The preview gallery is busy. Please try again shortly.');
           const clip: Clip = { ...generated, id: crypto.randomUUID(), source: 'ai', createdAt: now, expiresAt: now + PREVIEW_TTL_MS };

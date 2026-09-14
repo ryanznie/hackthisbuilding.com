@@ -1,6 +1,6 @@
 import { convertIndexedToRgb, decode } from 'fast-png';
 import { COLS, ROWS, type Frame, type RGB, type Scene } from '../shared/contracts';
-import { ApiFailure, checkPrompt, moderate, parseModelJson, validateRenderedScene, type AIBinding } from './generation';
+import { ApiFailure, checkPrompt, moderate, parseModelJson, validateRenderedScene, type AIBinding, type GenerationOptions } from './generation';
 import { requestOpenRouter } from './openrouter';
 import { prepareBoundedPng } from './png';
 
@@ -63,10 +63,13 @@ async function sundaiReference(assets: Fetcher): Promise<string> {
   return `data:image/png;base64,${btoa(binary)}`;
 }
 
-export async function generateImageAnimation(ai: AIBinding, apiKey: string, promptInput: unknown, assets: Fetcher, options: { moderation?: boolean } = {}): Promise<{ title: string; interpretation: string; scene: Scene }> {
+export async function generateImageAnimation(ai: AIBinding, apiKey: string, promptInput: unknown, assets: Fetcher, options: GenerationOptions = {}): Promise<{ title: string; interpretation: string; scene: Scene }> {
   const moderation = options.moderation !== false;
   const prompt = checkPrompt(promptInput, moderation);
-  if (moderation) await moderate(ai, prompt);
+  if (moderation) {
+    if (options.validator) await options.validator.moderate(prompt);
+    else await moderate(ai, prompt);
+  }
   const sundai = /\bsundai\b/i.test(prompt);
   const reference = sundai ? await sundaiReference(assets) : undefined;
   const result = await requestOpenRouter(apiKey, '/images', {
