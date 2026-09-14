@@ -4,7 +4,7 @@ The public app is at **https://www.hackthisbuilding.com**. The bare domain forwa
 
 This application is an interactive **in-browser simulator**. The current source renders actual Three.js building geometry with 153 animated windows, following the provided nighttime simulator reference. Its windows use the same 17-row × 9-column RGB frames as the deterministic animation engine. An optional local runner now bridges those frames to an organizer simulator instance, but no actual authorized instance or physical-building connection has been verified. See [acceptance results](acceptance-results.md) for the distinction between local checks and public deployment.
 
-The Red Sox/Weather buttons, Mario activity, domain colors, and bridge changes described here are current source behavior. Their publication and new browser acceptance are pending; the public address alone does not establish that these changes are deployed.
+The Red Sox/Weather buttons, Pong and Mario activities, 30-second turns, and four-color idle screensaver were published from commit bdad26a on September 13, 2026 (EDT). The public API and matching frontend asset were verified. The bridge source is included; its external organizer instance is still unconfigured.
 
 The 3D module loads separately, with the 2D canvas retained during loading or WebGL failure. Pointer, touch, and keyboard camera controls change the viewpoint without changing the approved clip or shared clock. Arrow keys orbit, +/− zoom, and Home resets the view. Use the camera-view controls for preset framing.
 
